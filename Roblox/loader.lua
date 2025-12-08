@@ -94,11 +94,11 @@ end
 -- // 3. GAME DETECTION
 if PlaceID == 286090429 then
     -- ARSENAL
-    Load("https://raw.githubusercontent.com/sorlua/Projects/main/Arsenal.lua")
+    Load("https://raw.githubusercontent.com/sorlua/Projects/refs/heads/main/Roblox/Arsenal.lua")
 
 elseif PlaceID == 17666963475 then
     -- FIVE NIGHTS TD 2
-    Load("https://raw.githubusercontent.com/sorlua/Projects/main/FNTD2.lua")
+    Load("https://raw.githubusercontent.com/sorlua/Projects/refs/heads/main/Roblox/FNTD2.lua")
 
 else
     -- UNSUPPORTED GAME
