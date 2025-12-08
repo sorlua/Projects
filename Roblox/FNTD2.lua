@@ -1,10 +1,3 @@
---[[
-    sor.lua // industrialist [stable_v3]
-    repo: itssor/private-builds
-    library: obsidian
-    status: spam_fixed
-]]
-
 local Services = {
     Players = game:GetService("Players"),
     ReplicatedStorage = game:GetService("ReplicatedStorage"),
@@ -181,4 +174,4 @@ SaveManager:BuildConfigSection(Tabs.Settings)
 ThemeManager:ApplyToTab(Tabs.Settings)
 SaveManager:LoadAutoloadConfig()
 
-Library:Notify("sor.lua [stable] loaded.", 3)
+Library:Notify("sor.lua loaded.", 3)
