@@ -20,7 +20,7 @@ local save = loadstring(game:HttpGet(repo .. 'addons/SaveManager.lua'))()
 local esp = loadstring(game:HttpGet('https://sirius.menu/sense'))()
 
 local win = lib:CreateWindow({
-    Title = "sor.lua / universal",
+    Title = "sor.lua // universal",
     Center = true,
     AutoShow = true,
     TabPadding = 8
