@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>sor.lua // gateway</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+
+        :root {
+            --bg: #050505;
+            --accent: #ff002b;
+            --text: #e0e0e0;
+            --dim: #444;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: 'JetBrains Mono', monospace;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        /* crt overlay */
+        body::after {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 2;
+            background-size: 100% 2px, 3px 100%;
+            pointer-events: none;
+        }
+
+        .container {
+            width: 400px;
+            z-index: 3;
+        }
+
+        .header {
+            border-bottom: 1px solid var(--accent);
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .status { color: var(--accent); font-size: 0.8rem; }
+        
+        .log {
+            font-size: 0.9rem;
+            color: var(--dim);
+            margin-bottom: 30px;
+            height: 60px;
+        }
+
+        .links {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            opacity: 0; /* hidden init */
+            animation: fadeIn 1s forwards 2.5s;
+        }
+
+        a {
+            text-decoration: none;
+            color: var(--text);
+            border: 1px solid var(--dim);
+            padding: 10px 15px;
+            transition: 0.2s;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        a:hover {
+            border-color: var(--accent);
+            background: rgba(255, 0, 43, 0.05);
+            text-shadow: 0 0 5px var(--accent);
+        }
+
+        a span { font-size: 0.8rem; color: var(--dim); }
+        a:hover span { color: var(--accent); }
+
+        /* typing anim */
+        .typewriter h1 {
+            overflow: hidden;
+            border-right: .15em solid var(--accent); 
+            white-space: nowrap; 
+            margin: 0; 
+            letter-spacing: .15em;
+            animation: typing 2s steps(30, end), blink-caret .75s step-end infinite;
+        }
+
+        @keyframes typing { from { width: 0 } to { width: 100% } }
+        @keyframes blink-caret { from, to { border-color: transparent } 50% { border-color: var(--accent); } }
+        @keyframes fadeIn { to { opacity: 1; } }
+
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="header">
+            <div class="typewriter">
+                <h1>sor.lua</h1>
+            </div>
+            <div class="status">v2.0.0</div>
+        </div>
+
+        <div class="log" id="console">
+            > initializing connection...<br>
+        </div>
+
+        <div class="links">
+            <a href="https://github.com/sorlua" target="_blank">
+                github
+                <span>[source]</span>
+            </a>
+            <a href="https://discord.gg/dSH6BqTXAY" target="_blank">
+                discord
+                <span>[community]</span>
+            </a>
+            <a href="https://rscripts.net/script/sorlua-universal-hub-arsenal-fntd2-8Ivv" target="_blank">
+                rscripts
+                <span>[download]</span>
+            </a>
+            <a href="https://www.youtube.com/@itsorbtw" target="_blank">
+                youtube
+                <span>[media]</span>
+            </a>
+        </div>
+    </div>
+
+    <script>
+        const log = document.getElementById('console');
+        const lines = [
+            "> identity verified.",
+            "> systems nominal.",
+            "> welcome, user."
+        ];
+        
+        let delay = 800;
+        lines.forEach((line, index) => {
+            setTimeout(() => {
+                log.innerHTML += line + "<br>";
+                log.scrollTop = log.scrollHeight;
+            }, delay * (index + 1));
+        });
+    </script>
+</body>
+</html>
