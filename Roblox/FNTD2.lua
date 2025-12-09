@@ -14,7 +14,7 @@ local ThemeManager = loadstring(game:HttpGet(Repo .. 'addons/ThemeManager.lua'))
 local SaveManager = loadstring(game:HttpGet(Repo .. 'addons/SaveManager.lua'))()
 
 local Window = Library:CreateWindow({
-    Title = "sor.lua / fntd2 [industrialist]",
+    Title = "sor.lua / fntd2",
     Center = true, AutoShow = true, TabPadding = 8
 })
 
