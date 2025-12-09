@@ -5,159 +5,140 @@ import asyncio
 import google.generativeai as genai
 from discord.ext import tasks
 import os
+import time
 
 # // CONFIGURATION //
 DISCORD_TOKEN = "insert here"
 GEMINI_KEY = "insert here"
 CHANNEL_ID = 1447923185293983855
-GITHUB_ORG = "insert here"
+TARGET_REPO = "insert here"
+GITHUB_TOKEN = "insert here"
 
-# // SYSTEM INITIALIZATION //
+# // INIT //
 genai.configure(api_key=GEMINI_KEY)
-# using 1.5-flash for maximum velocity and valid schema
 model = genai.GenerativeModel('gemini-2.5-flash')
+client = discord.Client(intents=discord.Intents.default())
+client.tree = app_commands.CommandTree(client)
 
-class SorClient(discord.Client):
-    def __init__(self):
-        super().__init__(intents=discord.Intents.default())
-        self.tree = app_commands.CommandTree(self)
+# // HEADERS //
+headers = {
+    "Authorization": f"token {GITHUB_TOKEN}",
+    "Accept": "application/vnd.github.v3+json",
+    "Cache-Control": "no-cache"
+}
 
-    async def setup_hook(self):
-        await self.tree.sync()
-
-client = SorClient()
-
-# // STATE //
-processed_events = set()
-
-# // API FUNCTIONS //
-def get_latest_push_event():
-    # monitors entire organization for activity
-    url = f"https://api.github.com/orgs/{GITHUB_ORG}/events?per_page=5"
+# // API //
+def get_repo_events():
+    url = f"https://api.github.com/repos/{TARGET_REPO}/events?per_page=5&t={time.time()}"
     try:
-        r = requests.get(url)
-        if r.status_code == 200:
-            events = r.json()
-            for event in events:
-                if event['type'] == 'PushEvent':
-                    return event
-    except:
-        pass
+        r = requests.get(url, headers=headers)
+        if r.status_code == 200: return r.json()
+    except: pass
+    return []
+
+def get_commit_details(sha):
+    url = f"https://api.github.com/repos/{TARGET_REPO}/commits/{sha}"
+    try:
+        r = requests.get(url, headers=headers)
+        if r.status_code == 200: return r.json()
+    except: pass
     return None
 
-def get_commit_diff(repo_name, sha):
-    url = f"https://api.github.com/repos/{repo_name}/commits/{sha}"
-    try:
-        r = requests.get(url)
-        if r.status_code == 200:
-            return r.json()
-    except:
-        pass
-    return None
-
-def generate_intelligence(repo_name, commit_data, diff_data):
-    message = commit_data['message']
+def generate_ai(commit_data, diff_data):
+    msg = commit_data.get('message') or commit_data.get('commit', {}).get('message', 'update')
     
-    changes_summary = ""
-    
+    changes = ""
     if diff_data and 'files' in diff_data:
-        for file in diff_data['files']:
-            filename = file['filename']
-            patch = file.get('patch', '')
-            patch_snippet = patch[:2500] 
-            changes_summary += f"\nFile: {filename}\nDiff:\n{patch_snippet}\n"
-
-    # Optimization: If no files changed (e.g. merge commit), skip AI
-    if not changes_summary: return None
+        for f in diff_data['files']:
+            changes += f"\nFile: {f['filename']}\nDiff:\n{f.get('patch', '')[:3000]}\n"
+    
+    if not changes: changes = "No visible diffs. Use message."
 
     prompt = f"""
-    ROLE: You are 'sor', the lead developer.
-    TONE: Strictly lowercase. Industrial. Direct. Cold.
+    ROLE: 'sor', the lead developer.
+    TONE: Strictly lowercase. Cold. Industrial. Direct.
     PERSPECTIVE: First-person ("i").
     
-    CONTEXT: I pushed an update to '{repo_name}'.
-    
-    TASK: Analyze the diffs and describe what i changed.
+    TASK: Analyze the diffs to write a precise changelog.
     
     RULES:
-    1. USE FIRST PERSON: "i optimized the loader", "i patched the aimbot".
-    2. NO PASSIVE VOICE.
-    3. IGNORE: comments, whitespace, version bumps.
-    4. IF REPO IS 'sorlua/Projects': This is the script hub. Talk about features (aim, esp, fixes).
-    5. IF REPO IS 'sorlua/sorlua.github.io': This is the website.
-    6. If the changes are technical/invisible, say: "internal: system optimization".
+    1. Look specifically at lines starting with '+' (added text). READ THEM.
+    2. If I added specific text (e.g. "no api keys for you"), summarize that specific sentiment (e.g. "i denied access to credentials").
+    3. Do NOT use generic phrases like "refined documentation" unless the change is actually generic.
+    4. If I changed game logic, describe the feature (e.g. "i fixed the silent aim calculation").
+    5. NO PASSIVE VOICE. NO EMOJIS.
     
-    COMMIT MSG: "{message}"
-    
-    CODE DIFF:
-    {changes_summary}
+    MSG: "{msg}"
+    CODE DIFF: 
+    {changes}
     
     OUTPUT FORMAT:
     sor.lua // transmission
-    
-    [1 short, aggressive summary sentence]
-    
-    :: changelog [{repo_name}]
-    - [change 1]
-    - [change 2]
-    
-    status: active
+    [1 short sentence capturing the vibe of the change]
+    :: changelog
+    - [specific detail 1]
+    - [specific detail 2]
     """
-    
     try:
-        response = model.generate_content(prompt)
-        text = response.text.strip()
-        if "sor.lua //" not in text:
-            return f"sor.lua // transmission\n\ninternal: synchronization\n\n:: log\n- {message.lower()}"
-        return text
+        return model.generate_content(prompt).text.strip()
     except:
-        return f"sor.lua // transmission\n\n:: log\n- {message.lower()}"
+        return f"sor.lua // transmission\n\n:: log\n- {msg}"
 
-# // SLASH COMMANDS //
-@client.tree.command(name="script", description="generate loader loadstring")
-async def script_command(interaction: discord.Interaction):
-    code = "loadstring(game:HttpGet('https://raw.githubusercontent.com/sorlua/Projects/main/Roblox/loader.lua'))()"
-    await interaction.response.send_message(f"```lua\n{code}\n```", ephemeral=True)
+# // LOOP //
+latest_id = None
 
-# // LOOPS //
 @client.event
 async def on_ready():
-    global processed_events
-    print(f"sor.news global monitor active: {client.user}")
+    global latest_id
+    print(f"sor.news intelligence v2 active: {client.user}")
     
-    # Sync state on launch so we don't spam old news
-    latest = get_latest_push_event()
-    if latest:
-        processed_events.add(latest['id'])
-        print(f"synced to event: {latest['id']}")
+    events = get_repo_events()
+    if events:
+        latest_id = events[0]['id']
+        print(f"synced to event: {latest_id}")
     
-    monitor_org.start()
+    monitor_loop.start()
 
-@tasks.loop(seconds=15)
-async def monitor_org():
-    global processed_events
+@tasks.loop(seconds=1.0)
+async def monitor_loop():
+    global latest_id
+    print(".", end="", flush=True)
     
-    event = get_latest_push_event()
+    events = get_repo_events()
+    if not events: return
     
-    if event and event['id'] not in processed_events:
-        print(f"push detected: {event['repo']['name']}")
+    newest = events[0]
+    
+    if latest_id and newest['id'] != latest_id:
+        print(f"\n[DETECT] Event ID: {newest['id']} | Type: {newest['type']}")
         
-        processed_events.add(event['id'])
+        if newest['type'] == 'PushEvent':
+            payload = newest.get('payload', {})
+            commits = payload.get('commits', [])
+            
+            target_sha = None
+            target_commit_obj = None
+            
+            if commits:
+                target_commit_obj = commits[-1]
+                target_sha = target_commit_obj['sha']
+            elif 'head' in payload:
+                target_sha = payload['head']
+                target_commit_obj = get_commit_details(target_sha)
+            
+            if target_sha and target_commit_obj:
+                full_diff = get_commit_details(target_sha)
+                txt = generate_ai(target_commit_obj, full_diff)
+                
+                chan = client.get_channel(CHANNEL_ID)
+                if chan:
+                    embed = discord.Embed(description=txt, color=0xff002b)
+                    embed.set_footer(text=f"sor.lua // {target_sha[:7]}")
+                    await chan.send(embed=embed)
+                    print("[SENT]")
+                else:
+                    print("[ERROR] Channel ID invalid.")
         
-        commits = event['payload']['commits']
-        if commits:
-            head_commit = commits[-1]
-            repo_name = event['repo']['name']
-            
-            diff_data = get_commit_diff(repo_name, head_commit['sha'])
-            announcement = generate_intelligence(repo_name, head_commit, diff_data)
-            
-            if announcement:
-                channel = client.get_channel(CHANNEL_ID)
-                if channel:
-                    embed = discord.Embed(description=announcement, color=0xff002b)
-                    embed.set_footer(text=f"sor.lua // {repo_name} // {head_commit['sha'][:7]}")
-                    await channel.send(embed=embed)
-
+        latest_id = newest['id']
 
 client.run(DISCORD_TOKEN)
