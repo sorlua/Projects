@@ -13,10 +13,12 @@ local mouse = lp:GetMouse()
 local cam = s.ws.CurrentCamera
 
 local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
-local lib = loadstring(game:HttpGet(repo .. 'Library.lua'))()
+local success, lib = pcall(function() return loadstring(game:HttpGet(repo .. 'Library.lua'))() end)
+if not success then return end
+
 local theme = loadstring(game:HttpGet(repo .. 'addons/ThemeManager.lua'))()
 local save = loadstring(game:HttpGet(repo .. 'addons/SaveManager.lua'))()
-local esp = loadstring(game:HttpGet('https://sirius.menu/sense'))()
+local esp_succ, esp = pcall(function() return loadstring(game:HttpGet('https://sirius.menu/sense'))() end)
 
 local win = lib:CreateWindow({
     Title = "sor.lua / arsenal",
@@ -27,16 +29,17 @@ local win = lib:CreateWindow({
 
 local tabs = {
     combat = win:AddTab("combat"),
-    gun = win:AddTab("gun mods"),
     visuals = win:AddTab("visuals"),
     move = win:AddTab("movement"),
     world = win:AddTab("world"),
     cfg = win:AddTab("settings")
 }
 
+-- // COMBAT //
 local aim_box = tabs.combat:AddLeftGroupbox("aimbot")
 aim_box:AddToggle('aim_en', { Text = 'enabled', Default = false })
-aim_box:AddLabel('bind'):AddKeyPicker('aim_bind', { Default = 'MouseButton2', Mode = 'Hold', Text = 'aim bind' })
+    :AddKeyPicker('aim_bind', { Default = 'E', Mode = 'Hold', Text = 'aim bind' })
+
 aim_box:AddDropdown('aim_part', { Values = {'Head', 'UpperTorso', 'HumanoidRootPart'}, Default = 1, Text = 'part' })
 aim_box:AddSlider('aim_smooth', { Text = 'smoothness', Default = 1, Min = 1, Max = 10, Rounding = 1 })
 aim_box:AddToggle('aim_wall', { Text = 'wall check', Default = true })
@@ -48,19 +51,17 @@ sil_box:AddSlider('sil_fov', { Text = 'fov', Default = 100, Min = 10, Max = 500,
 sil_box:AddToggle('sil_draw', { Text = 'draw fov', Default = true }):AddColorPicker('sil_col', { Default = Color3.fromRGB(255, 0, 43) })
 sil_box:AddSlider('sil_chance', { Text = 'hit chance', Default = 100, Min = 0, Max = 100, Rounding = 0 })
 
-local hit_box = tabs.combat:AddLeftGroupbox("hitbox")
-hit_box:AddToggle('hit_en', { Text = 'expander', Default = false })
-hit_box:AddDropdown('hit_part', { Values = {'Head', 'HumanoidRootPart'}, Default = 1, Text = 'part' })
-hit_box:AddSlider('hit_size', { Text = 'size', Default = 4, Min = 2, Max = 30, Rounding = 1 })
-hit_box:AddSlider('hit_trans', { Text = 'transparency', Default = 0.5, Min = 0, Max = 1, Rounding = 1 })
+local trig_box = tabs.combat:AddLeftGroupbox("triggerbot")
+trig_box:AddToggle('trig_en', { Text = 'enabled', Default = false })
+    :AddKeyPicker('trig_bind', { Default = 'Q', Mode = 'Hold', Text = 'trigger bind' }) -- Swapped to Q for safety
+trig_box:AddSlider('trig_del', { Text = 'delay (ms)', Default = 0, Min = 0, Max = 500, Rounding = 0 })
 
-local gun_box = tabs.gun:AddLeftGroupbox("main")
-gun_box:AddToggle('no_recoil', { Text = 'no recoil', Default = false })
-gun_box:AddToggle('no_spread', { Text = 'no spread', Default = false })
-gun_box:AddToggle('inf_ammo', { Text = 'infinite ammo (visual)', Default = false })
-gun_box:AddToggle('auto_fire', { Text = 'auto fire', Default = false })
-gun_box:AddSlider('fire_rate', { Text = 'fire rate mod', Default = 0, Min = 0, Max = 100, Rounding = 0 })
+local mod_box = tabs.combat:AddRightGroupbox("mods")
+mod_box:AddToggle('hit_en', { Text = 'hitbox expander', Default = false })
+mod_box:AddSlider('hit_size', { Text = 'size', Default = 4, Min = 2, Max = 20, Rounding = 1 })
+mod_box:AddSlider('hit_trans', { Text = 'transparency', Default = 0.5, Min = 0, Max = 1, Rounding = 1 })
 
+-- // VISUALS //
 local esp_main = tabs.visuals:AddLeftGroupbox("esp")
 esp_main:AddToggle('esp_mas', { Text = 'master switch', Default = false })
 esp_main:AddToggle('esp_box', { Text = 'boxes', Default = true })
@@ -69,7 +70,7 @@ esp_main:AddToggle('esp_name', { Text = 'names', Default = false })
 esp_main:AddToggle('esp_hp', { Text = 'health', Default = false })
 esp_main:AddToggle('esp_dist', { Text = 'distance', Default = false })
 esp_main:AddToggle('esp_trace', { Text = 'tracers', Default = false })
-esp_main:AddLabel('color'):AddColorPicker('esp_col', { Default = Color3.fromRGB(255, 0, 43) })
+esp_main:AddLabel('esp color'):AddColorPicker('esp_col', { Default = Color3.fromRGB(255, 0, 43) })
 
 local cham_box = tabs.visuals:AddRightGroupbox("chams")
 cham_box:AddToggle('cham_en', { Text = 'enabled', Default = false })
@@ -82,20 +83,24 @@ view_box:AddToggle('fov_en', { Text = 'fov changer', Default = false })
 view_box:AddSlider('fov_val', { Text = 'value', Default = 100, Min = 70, Max = 120, Rounding = 0 })
 view_box:AddToggle('cross_en', { Text = 'custom crosshair', Default = false }):AddColorPicker('cross_col', { Default = Color3.fromRGB(255, 0, 43) })
 
+-- // MOVEMENT //
 local move_main = tabs.move:AddLeftGroupbox("main")
 move_main:AddToggle('spd_en', { Text = 'speed', Default = false })
-move_main:AddKeyPicker('spd_bind', { Default = 'V', NoUI = true, Text = 'speed bind' })
+    :AddKeyPicker('spd_bind', { Default = 'V', NoUI = true, Text = 'speed bind' })
 move_main:AddSlider('spd_val', { Text = 'factor', Default = 2, Min = 1, Max = 5, Rounding = 1 })
+
 move_main:AddToggle('fly_en', { Text = 'flight', Default = false })
-move_main:AddKeyPicker('fly_bind', { Default = 'F', NoUI = true, Text = 'fly bind' })
+    :AddKeyPicker('fly_bind', { Default = 'F', NoUI = true, Text = 'fly bind' })
 move_main:AddSlider('fly_spd', { Text = 'speed', Default = 50, Min = 10, Max = 200, Rounding = 0 })
 move_main:AddToggle('bhop', { Text = 'bhop', Default = false })
 
+-- // WORLD //
 local world_box = tabs.world:AddLeftGroupbox("environment")
 world_box:AddToggle('fullbright', { Text = 'fullbright', Default = false })
 world_box:AddToggle('nofog', { Text = 'no fog', Default = false })
 world_box:AddLabel('ambience'):AddColorPicker('amb_col', { Default = Color3.fromRGB(255, 255, 255) })
 
+-- // LOGIC //
 local function is_valid(p)
     return p and p.Character and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 and p.Character:FindFirstChild("HumanoidRootPart") and p.Character:FindFirstChild("Head")
 end
@@ -158,7 +163,7 @@ local function get_closest_sil(fov)
     return target
 end
 
--- aimbot loop
+-- // LOOPS //
 local sil_fov = Drawing.new("Circle")
 sil_fov.Thickness = 1
 sil_fov.NumSides = 64
@@ -171,7 +176,6 @@ s.rs.RenderStepped:Connect(function()
     sil_fov.Position = Vector2.new(mouse.X, mouse.Y + 36)
     sil_fov.Color = lib.Options.sil_col.Value
     
-    -- legit aim
     if lib.Toggles.aim_en.Value and lib.Options.aim_bind:GetState() then
         locked = get_closest(200)
         if locked then
@@ -179,12 +183,22 @@ s.rs.RenderStepped:Connect(function()
             cam.CFrame = cam.CFrame:Lerp(goal, 1 / lib.Options.aim_smooth.Value)
         end
     end
+end)
 
-    -- gun mods
-    if is_valid(lp) then
-        if lib.Toggles.no_recoil.Value then
-            cam.CFrame = cam.CFrame * CFrame.Angles(0,0,0) -- crude visual fix, real recoil is script based
+-- triggerbot logic
+task.spawn(function()
+    while true do
+        if lib.Toggles.trig_en.Value and lib.Options.trig_bind:GetState() then
+            local t = mouse.Target
+            if t and t.Parent then
+                local p = s.plrs:GetPlayerFromCharacter(t.Parent)
+                if p and p ~= lp and not is_team(p) then
+                    if lib.Options.trig_del.Value > 0 then task.wait(lib.Options.trig_del.Value / 1000) end
+                    s.vim:ClickButton1(Vector2.new())
+                end
+            end
         end
+        task.wait(0.05)
     end
 end)
 
@@ -212,7 +226,7 @@ s.rs.Heartbeat:Connect(function()
     if lib.Toggles.hit_en.Value then
         for _, p in pairs(s.plrs:GetPlayers()) do
             if p ~= lp and is_valid(p) and not is_team(p) then
-                local part = p.Character:FindFirstChild(lib.Options.hit_part.Value)
+                local part = p.Character:FindFirstChild("Head")
                 if part then
                     part.Size = Vector3.new(lib.Options.hit_size.Value, lib.Options.hit_size.Value, lib.Options.hit_size.Value)
                     part.Transparency = lib.Options.hit_trans.Value
@@ -250,7 +264,7 @@ s.rs.RenderStepped:Connect(function()
     end
 end)
 
--- visuals logic
+-- visuals
 local cross_x = Drawing.new("Line")
 local cross_y = Drawing.new("Line")
 cross_x.Thickness = 1; cross_y.Thickness = 1
@@ -277,21 +291,22 @@ s.rs.RenderStepped:Connect(function()
     end
 end)
 
--- esp
-task.spawn(function()
-    esp.Load()
-    while true do
-        esp.teamSettings.enemy.enabled = lib.Toggles.esp_mas.Value
-        esp.teamSettings.enemy.box = lib.Toggles.esp_box.Value
-        esp.teamSettings.enemy.skeleton = lib.Toggles.esp_skel.Value
-        esp.teamSettings.enemy.name = lib.Toggles.esp_name.Value
-        esp.teamSettings.enemy.healthBar = lib.Toggles.esp_hp.Value
-        esp.teamSettings.enemy.tracer = lib.Toggles.esp_trace.Value
-        esp.teamSettings.enemy.distance = lib.Toggles.esp_dist.Value
-        esp.teamSettings.enemy.boxColor = lib.Options.esp_col.Value
-        task.wait(0.5)
-    end
-end)
+if esp_succ then
+    task.spawn(function()
+        esp.Load()
+        while true do
+            esp.teamSettings.enemy.enabled = lib.Toggles.esp_mas.Value
+            esp.teamSettings.enemy.box = lib.Toggles.esp_box.Value
+            esp.teamSettings.enemy.skeleton = lib.Toggles.esp_skel.Value
+            esp.teamSettings.enemy.name = lib.Toggles.esp_name.Value
+            esp.teamSettings.enemy.healthBar = lib.Toggles.esp_hp.Value
+            esp.teamSettings.enemy.tracer = lib.Toggles.esp_trace.Value
+            esp.teamSettings.enemy.distance = lib.Toggles.esp_dist.Value
+            esp.teamSettings.enemy.boxColor = lib.Options.esp_col.Value
+            task.wait(0.5)
+        end
+    end)
+end
 
 local cham_cache = {}
 s.rs.RenderStepped:Connect(function()
