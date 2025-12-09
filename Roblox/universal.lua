@@ -66,7 +66,7 @@ trig_box:AddSlider('trig_del', { Text = 'delay (ms)', Default = 0, Min = 0, Max 
 trig_box:AddToggle('trig_team', { Text = 'team check', Default = true })
 
 local esp_main = tabs.visuals:AddLeftGroupbox("esp")
-esp_main:AddToggle('esp_mas', { Text = 'master switch', Default = false })
+esp_main:AddToggle('esp_mas', { Text = 'esp', Default = false })
 esp_main:AddToggle('esp_box', { Text = 'boxes', Default = true })
 esp_main:AddToggle('esp_skel', { Text = 'skeletons', Default = false })
 esp_main:AddToggle('esp_name', { Text = 'names', Default = false })
