@@ -160,7 +160,7 @@ LocalPlayer.OnTeleport:Connect(function(State)
         local queue = queue_on_teleport or syn.queue_on_teleport
         queue([[
             repeat task.wait() until game:IsLoaded()
-            loadstring(game:HttpGet("https://raw.githubusercontent.com/itssor/private-builds/main/fntd_booster.lua"))()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/sorlua/Projects/refs/heads/main/Roblox/FNTD2.lua"))()
         ]])
     end
 end)
