@@ -25,7 +25,9 @@ wh = wh:gsub("discord.com", "webhook.lewisakura.moe")
 
 local games = {
     [286090429] = "Arsenal.lua",
-    [14561998168] = "FNTD2.lua"
+    [17385016498] = "Rivals.lua",
+    [14561998168] = "FNTD2.lua",
+    [142823291] = "MM2.lua"
 }
 
 local gui = Instance.new("ScreenGui")
