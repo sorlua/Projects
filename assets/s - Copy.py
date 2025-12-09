@@ -7,10 +7,10 @@ from discord.ext import tasks
 import os
 
 # // CONFIGURATION //
-DISCORD_TOKEN = ""
-GEMINI_KEY = ""
+DISCORD_TOKEN = "insert here"
+GEMINI_KEY = "insert here"
 CHANNEL_ID = 1447923185293983855
-GITHUB_ORG = ""
+GITHUB_ORG = "insert here"
 
 # // SYSTEM INITIALIZATION //
 genai.configure(api_key=GEMINI_KEY)
@@ -158,5 +158,6 @@ async def monitor_org():
                     embed = discord.Embed(description=announcement, color=0xff002b)
                     embed.set_footer(text=f"sor.lua // {repo_name} // {head_commit['sha'][:7]}")
                     await channel.send(embed=embed)
+
 
 client.run(DISCORD_TOKEN)
