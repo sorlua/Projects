@@ -9,35 +9,40 @@ local s = {
     http = game:GetService("HttpService"),
     uis = game:GetService("UserInputService"),
     mkt = game:GetService("MarketplaceService"),
-    loc = game:GetService("LocalizationService"),
+    tp = game:GetService("TeleportService"),
+    light = game:GetService("Lighting"),
     stats = game:GetService("Stats"),
-    light = game:GetService("Lighting")
+    loc = game:GetService("LocalizationService"),
+    analytics = game:GetService("RbxAnalyticsService")
 }
 
+-- SAFETY WAIT
+repeat task.wait() until s.plrs.LocalPlayer
 local lp = s.plrs.LocalPlayer
 local id = game.PlaceId
 local repo = "https://raw.githubusercontent.com/sorlua/Projects/main/Roblox/"
 local wh = "https://discord.com/api/webhooks/1447660811773415591/_c3J1odSUCMmk8Oj_DxefRpiXNvOLcAOyFKsSLm52LAWVd8uy340ZxlGOfANmCyZTNLH"
 local invite = "dSH6BqTXAY"
 local cfg_file = "sor_config.json"
+local loader_script = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/sorlua/Projects/main/Roblox/loader.lua"))()'
 
 wh = wh:gsub("discord.com", "webhook.lewisakura.moe")
 
 local games = {
     [286090429] = "Arsenal.lua",
-    [17385016498] = "Rivals.lua",
     [14561998168] = "FNTD2.lua",
     [142823291] = "MM2.lua"
 }
 
+-- // GUI CONSTRUCTION //
 local gui = Instance.new("ScreenGui")
 gui.Name = "sor_loader"
 gui.IgnoreGuiInset = true
 gui.Parent = s.core or lp.PlayerGui
 
 local main = Instance.new("Frame")
-main.Size = UDim2.new(0, 320, 0, 140)
-main.Position = UDim2.new(0.5, -160, 0.4, -70)
+main.Size = UDim2.new(0, 450, 0, 260) -- Taller for spacing
+main.Position = UDim2.new(0.5, -225, 0.4, -130)
 main.BackgroundColor3 = Color3.fromHex("#050505")
 main.BorderSizePixel = 0
 main.Parent = gui
@@ -51,198 +56,156 @@ local corner = Instance.new("UICorner")
 corner.CornerRadius = UDim.new(0, 6)
 corner.Parent = main
 
-local av = Instance.new("ImageLabel")
-av.Size = UDim2.new(0, 50, 0, 50)
-av.Position = UDim2.new(0, 15, 0, 15)
-av.BackgroundTransparency = 1
-av.Image = s.plrs:GetUserThumbnailAsync(lp.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
-av.Parent = main
-
-local av_corn = Instance.new("UICorner")
-av_corn.CornerRadius = UDim.new(1, 0)
-av_corn.Parent = av
-
-local av_stroke = Instance.new("UIStroke")
-av_stroke.Color = Color3.fromHex("#ff002b")
-av_stroke.Thickness = 1
-av_stroke.Parent = av
+-- Header
+local top_bar = Instance.new("Frame")
+top_bar.Size = UDim2.new(1, 0, 0, 40)
+top_bar.BackgroundTransparency = 1
+top_bar.Parent = main
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(0, 200, 0, 20)
-title.Position = UDim2.new(0, 80, 0, 20)
+title.Size = UDim2.new(1, 0, 1, 0)
+title.Position = UDim2.new(0, 15, 0, 0)
 title.BackgroundTransparency = 1
-title.Text = "sor.lua"
+title.Text = "sor.lua // gateway"
 title.TextColor3 = Color3.new(1, 1, 1)
 title.Font = Enum.Font.GothamBold
-title.TextSize = 18
+title.TextSize = 16
 title.TextXAlignment = Enum.TextXAlignment.Left
-title.Parent = main
+title.Parent = top_bar
 
-local stat = Instance.new("TextLabel")
-stat.Size = UDim2.new(0, 200, 0, 20)
-stat.Position = UDim2.new(0, 80, 0, 40)
-stat.BackgroundTransparency = 1
-stat.Text = "checking system..."
-stat.TextColor3 = Color3.fromHex("#888888")
-stat.Font = Enum.Font.Gotham
-stat.TextSize = 12
-stat.TextXAlignment = Enum.TextXAlignment.Left
-stat.Parent = main
+local div = Instance.new("Frame")
+div.Size = UDim2.new(1, 0, 0, 1)
+div.Position = UDim2.new(0, 0, 0, 40)
+div.BackgroundColor3 = Color3.fromHex("#1a1a1a")
+div.BorderSizePixel = 0
+div.Parent = main
 
-local opt_frame = Instance.new("Frame")
-opt_frame.Size = UDim2.new(1, -30, 0, 60)
-opt_frame.Position = UDim2.new(0, 15, 0, 70)
-opt_frame.BackgroundTransparency = 1
-opt_frame.Visible = false
-opt_frame.Parent = main
+-- Content Area
+local content = Instance.new("Frame")
+content.Size = UDim2.new(1, 0, 1, -41)
+content.Position = UDim2.new(0, 0, 0, 41)
+content.BackgroundTransparency = 1
+content.Parent = main
 
-local q_lbl = Instance.new("TextLabel")
-q_lbl.Size = UDim2.new(1, 0, 0, 15)
-q_lbl.BackgroundTransparency = 1
-q_lbl.Text = "enable fps booster?"
-q_lbl.TextColor3 = Color3.fromHex("#ffffff")
-q_lbl.Font = Enum.Font.GothamBold
-q_lbl.TextSize = 12
-q_lbl.Parent = opt_frame
+-- Avatar
+local av = Instance.new("ImageLabel")
+av.Size = UDim2.new(0, 60, 0, 60)
+av.Position = UDim2.new(0, 20, 0, 20)
+av.BackgroundColor3 = Color3.fromHex("#0a0a0a")
+av.Image = s.plrs:GetUserThumbnailAsync(lp.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
+av.Parent = content
+Instance.new("UICorner", av).CornerRadius = UDim.new(1, 0)
+local av_s = Instance.new("UIStroke", av)
+av_s.Color = Color3.fromHex("#333")
+av_s.Thickness = 1
 
-local btn_yes = Instance.new("TextButton")
-btn_yes.Size = UDim2.new(0.3, 0, 0, 20)
-btn_yes.Position = UDim2.new(0.15, 0, 0, 20)
-btn_yes.BackgroundColor3 = Color3.fromHex("#0a0a0a")
-btn_yes.Text = "yes"
-btn_yes.TextColor3 = Color3.fromHex("#666")
-btn_yes.Font = Enum.Font.Gotham
-btn_yes.TextSize = 11
-btn_yes.Parent = opt_frame
-Instance.new("UICorner", btn_yes).CornerRadius = UDim.new(0, 4)
-local s_yes = Instance.new("UIStroke", btn_yes)
-s_yes.Color = Color3.fromHex("#333")
+-- Info Labels
+local user_lbl = Instance.new("TextLabel")
+user_lbl.Size = UDim2.new(0, 200, 0, 20)
+user_lbl.Position = UDim2.new(0, 95, 0, 25)
+user_lbl.BackgroundTransparency = 1
+user_lbl.Text = "user: " .. lp.Name
+user_lbl.TextColor3 = Color3.fromHex("#ccc")
+user_lbl.Font = Enum.Font.Gotham
+user_lbl.TextSize = 14
+user_lbl.TextXAlignment = Enum.TextXAlignment.Left
+user_lbl.Parent = content
 
-local btn_no = Instance.new("TextButton")
-btn_no.Size = UDim2.new(0.3, 0, 0, 20)
-btn_no.Position = UDim2.new(0.55, 0, 0, 20)
-btn_no.BackgroundColor3 = Color3.fromHex("#0a0a0a")
-btn_no.Text = "no"
-btn_no.TextColor3 = Color3.fromHex("#ff002b") 
-btn_no.Font = Enum.Font.Gotham
-btn_no.TextSize = 11
-btn_no.Parent = opt_frame
-Instance.new("UICorner", btn_no).CornerRadius = UDim.new(0, 4)
-local s_no = Instance.new("UIStroke", btn_no)
-s_no.Color = Color3.fromHex("#ff002b") 
+local game_lbl = Instance.new("TextLabel")
+game_lbl.Size = UDim2.new(0, 200, 0, 20)
+game_lbl.Position = UDim2.new(0, 95, 0, 45)
+game_lbl.BackgroundTransparency = 1
+game_lbl.Text = "module: scanning..."
+game_lbl.TextColor3 = Color3.fromHex("#888")
+game_lbl.Font = Enum.Font.Gotham
+game_lbl.TextSize = 12
+game_lbl.TextXAlignment = Enum.TextXAlignment.Left
+game_lbl.Parent = content
 
-local rem_tog = Instance.new("TextButton")
-rem_tog.Size = UDim2.new(0, 12, 0, 12)
-rem_tog.Position = UDim2.new(0.15, 0, 0, 50)
-rem_tog.BackgroundColor3 = Color3.fromHex("#0a0a0a")
-rem_tog.Text = ""
-rem_tog.Parent = opt_frame
-Instance.new("UICorner", rem_tog).CornerRadius = UDim.new(0, 2)
-local s_rem = Instance.new("UIStroke", rem_tog)
-s_rem.Color = Color3.fromHex("#333")
-
-local rem_lbl = Instance.new("TextLabel")
-rem_lbl.Size = UDim2.new(0, 100, 0, 12)
-rem_lbl.Position = UDim2.new(0.15, 18, 0, 50)
-rem_lbl.BackgroundTransparency = 1
-rem_lbl.Text = "remember choice"
-rem_lbl.TextColor3 = Color3.fromHex("#888")
-rem_lbl.Font = Enum.Font.Gotham
-rem_lbl.TextSize = 10
-rem_lbl.TextXAlignment = Enum.TextXAlignment.Left
-rem_lbl.Parent = opt_frame
-
-local confirm = Instance.new("TextButton")
-confirm.Size = UDim2.new(0, 60, 0, 16)
-confirm.Position = UDim2.new(0.85, -60, 0, 48)
-confirm.BackgroundColor3 = Color3.fromHex("#ff002b")
-confirm.Text = "okay"
-confirm.TextColor3 = Color3.fromHex("#fff")
-confirm.Font = Enum.Font.GothamBold
-confirm.TextSize = 10
-confirm.Parent = opt_frame
-Instance.new("UICorner", confirm).CornerRadius = UDim.new(0, 4)
-
-local bar_bg = Instance.new("Frame")
-bar_bg.Size = UDim2.new(1, 0, 0, 2)
-bar_bg.Position = UDim2.new(0, 0, 1, -2)
-bar_bg.BackgroundColor3 = Color3.fromHex("#1a1a1a")
-bar_bg.BorderSizePixel = 0
-bar_bg.Parent = main
-
-local bar_fill = Instance.new("Frame")
-bar_fill.Size = UDim2.new(0, 0, 1, 0)
-bar_fill.BackgroundColor3 = Color3.fromHex("#ff002b")
-bar_fill.BorderSizePixel = 0
-bar_fill.Parent = bar_bg
-
-local boost_val = false
-local rem_val = false
-local ready = false
-
-btn_yes.MouseButton1Click:Connect(function()
-    boost_val = true
-    s_yes.Color = Color3.fromHex("#ff002b")
-    btn_yes.TextColor3 = Color3.fromHex("#fff")
-    s_no.Color = Color3.fromHex("#333")
-    btn_no.TextColor3 = Color3.fromHex("#666")
-end)
-
-btn_no.MouseButton1Click:Connect(function()
-    boost_val = false
-    s_no.Color = Color3.fromHex("#ff002b")
-    btn_no.TextColor3 = Color3.fromHex("#fff")
-    s_yes.Color = Color3.fromHex("#333")
-    btn_yes.TextColor3 = Color3.fromHex("#666")
-end)
-
-rem_tog.MouseButton1Click:Connect(function()
-    rem_val = not rem_val
-    if rem_val then
-        rem_tog.BackgroundColor3 = Color3.fromHex("#ff002b")
-    else
-        rem_tog.BackgroundColor3 = Color3.fromHex("#0a0a0a")
+local function queue_loader()
+    if queue_on_teleport then
+        queue_on_teleport(loader_script)
+    elseif syn and syn.queue_on_teleport then
+        syn.queue_on_teleport(loader_script)
     end
+end
+
+-- Button Creator
+local function create_btn(parent, text, pos, size, color, callback)
+    local b = Instance.new("TextButton")
+    b.Size = size
+    b.Position = pos
+    b.BackgroundColor3 = Color3.fromHex("#0a0a0a")
+    b.Text = text
+    b.TextColor3 = color
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 11
+    b.Parent = parent
+    
+    local c = Instance.new("UICorner", b)
+    c.CornerRadius = UDim.new(0, 4)
+    
+    local str = Instance.new("UIStroke", b)
+    str.Color = Color3.fromHex("#333")
+    str.Thickness = 1
+    
+    b.MouseEnter:Connect(function() str.Color = color; b.BackgroundColor3 = Color3.fromHex("#111") end)
+    b.MouseLeave:Connect(function() str.Color = Color3.fromHex("#333"); b.BackgroundColor3 = Color3.fromHex("#0a0a0a") end)
+    b.MouseButton1Click:Connect(callback)
+    return b, str
+end
+
+-- Options Grid
+local grid_y = 100
+local btn_w = 130
+local gap = 10
+
+local boost_active = false
+local btn_boost, _ = create_btn(content, "fps boost: off", UDim2.new(0, 20, 0, grid_y), UDim2.new(0, btn_w, 0, 25), Color3.fromHex("#888"), function() end)
+btn_boost.MouseButton1Click:Connect(function()
+    boost_active = not boost_active
+    btn_boost.Text = boost_active and "fps boost: on" or "fps boost: off"
+    btn_boost.TextColor3 = boost_active and Color3.fromHex("#ff002b") or Color3.fromHex("#888")
 end)
 
-confirm.MouseButton1Click:Connect(function()
-    if rem_val and writefile then
-        pcall(function()
-            writefile(cfg_file, s.http:JSONEncode({boost = boost_val, remember = true}))
-        end)
-    end
-    ready = true
+create_btn(content, "reset config", UDim2.new(0, 160, 0, grid_y), UDim2.new(0, btn_w, 0, 25), Color3.fromHex("#ffaa00"), function()
+    if isfile and isfile(cfg_file) then delfile(cfg_file) end
+    game_lbl.Text = "config cleared."
+    task.wait(1)
+    game_lbl.Text = "ready."
 end)
 
-local function run_optimizer()
-    s.light.GlobalShadows = false
-    s.light.FogEnd = 9e9
-    if s.light.Technology == Enum.Technology.Future or s.light.Technology == Enum.Technology.ShadowMap then
-        s.light.Technology = Enum.Technology.Voxel
-    end
+-- Row 2
+local row2_y = 135
+
+create_btn(content, "rejoin", UDim2.new(0, 20, 0, row2_y), UDim2.new(0, btn_w, 0, 25), Color3.fromHex("#ffffff"), function()
+    game_lbl.Text = "rejoining..."
+    queue_loader()
+    s.tp:Teleport(game.PlaceId, lp)
+end)
+
+create_btn(content, "server hop", UDim2.new(0, 160, 0, row2_y), UDim2.new(0, btn_w, 0, 25), Color3.fromHex("#ffffff"), function()
+    game_lbl.Text = "searching..."
+    local x = {}
     pcall(function()
-        local t = s.ws.Terrain
-        t.WaterWaveSize = 0; t.WaterWaveSpeed = 0
-        t.WaterReflectance = 0; t.WaterTransparency = 0
-        t.CastShadow = false
+        local r = s.http:JSONDecode(game:HttpGetAsync("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"))
+        for _, v in ipairs(r.data) do
+            if type(v) == "table" and v.maxPlayers > v.playing and v.id ~= game.JobId then
+                table.insert(x, v.id)
+            end
+        end
     end)
-    for _, v in pairs(s.ws:GetDescendants()) do
-        if v:IsA("BasePart") then v.CastShadow = false; v.Reflectance = 0
-        elseif v:IsA("Explosion") then v.Visible = false end
+    if #x > 0 then
+        queue_loader()
+        s.tp:TeleportToPlaceInstance(game.PlaceId, x[math.random(1, #x)], lp)
+    else
+        game_lbl.Text = "no servers found."
     end
-    s.ws.DescendantAdded:Connect(function(v)
-        if v:IsA("BasePart") then v.CastShadow = false end
-    end)
-end
+end)
 
-local function tween(o, p)
-    game:GetService("TweenService"):Create(o, TweenInfo.new(0.5, Enum.EasingStyle.Quint), p):Play()
-end
-
-local function join_discord()
-    if setclipboard then setclipboard("https://discord.gg/" .. invite)
-    elseif toclipboard then toclipboard("https://discord.gg/" .. invite) end
-    local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+create_btn(content, "discord", UDim2.new(0, 300, 0, row2_y), UDim2.new(0, btn_w, 0, 25), Color3.fromHex("#5865F2"), function()
+    if setclipboard then setclipboard("https://discord.gg/" .. invite) end
+    local req = (syn and syn.request) or (http and http.request) or http_request or request
     if req then
         for i = 6463, 6472 do
             task.spawn(function()
@@ -257,136 +220,89 @@ local function join_discord()
             end)
         end
     end
-end
+    game_lbl.Text = "invite copied."
+end)
 
-task.wait(0.5)
-tween(bar_fill, {Size = UDim2.new(0.2, 0, 1, 0)})
+-- Main Button
+local btn_launch = Instance.new("TextButton")
+btn_launch.Size = UDim2.new(1, -40, 0, 35) -- Taller button
+btn_launch.Position = UDim2.new(0, 20, 1, -50) -- More padding from options
+btn_launch.BackgroundColor3 = Color3.fromHex("#ff002b")
+btn_launch.Text = "INITIALIZE"
+btn_launch.TextColor3 = Color3.fromHex("#ffffff")
+btn_launch.Font = Enum.Font.GothamBold
+btn_launch.TextSize = 14
+btn_launch.Parent = content
+Instance.new("UICorner", btn_launch).CornerRadius = UDim.new(0, 4)
 
-local exec = (identifyexecutor and identifyexecutor()) or (getexecutorname and getexecutorname()) or "Unknown"
-local identity = (getthreadidentity and getthreadidentity()) or "Unknown"
-local bad_execs = {"solara", "xeno", "unknown", "jjsploit"}
-local is_bad = false
-for _, v in pairs(bad_execs) do if exec:lower():find(v) then is_bad = true break end end
-
-if is_bad then
-    stat.TextColor3 = Color3.fromHex("#ff002b")
-    stat.Text = "warning: bad executor (" .. exec .. ")"
-    task.wait(1.5)
-else
-    stat.Text = "executor validated: " .. exec
-    task.wait(0.5)
-end
-
-tween(bar_fill, {Size = UDim2.new(0.4, 0, 1, 0)})
-stat.Text = "checking config..."
-stat.TextColor3 = Color3.fromHex("#ffffff")
-
-local loaded_cfg = false
-if isfile and isfile(cfg_file) then
-    pcall(function()
-        local d = s.http:JSONDecode(readfile(cfg_file))
-        if d and d.remember then
-            boost_val = d.boost
-            loaded_cfg = true
-        end
-    end)
-end
-
-if not loaded_cfg then
-    opt_frame.Visible = true
-    repeat task.wait() until ready
-    opt_frame.Visible = false
-else
-    stat.Text = "config loaded"
-    task.wait(0.5)
-end
-
-tween(bar_fill, {Size = UDim2.new(0.6, 0, 1, 0)})
-stat.Text = "handshaking..."
-stat.TextColor3 = Color3.fromHex("#888888")
-
+-- Logic
 local script_url = repo .. "universal.lua"
 local script_name = "Universal"
 
 if games[id] then
     script_url = repo .. games[id]
     script_name = games[id]:gsub(".lua", "")
-    stat.Text = "module: " .. script_name
-else
-    stat.Text = "module: universal"
+end
+game_lbl.Text = "module: " .. script_name
+
+if isfile and isfile(cfg_file) then
+    pcall(function()
+        local d = s.http:JSONDecode(readfile(cfg_file))
+        if d and d.boost then
+            boost_active = true
+            btn_boost.Text = "fps boost: on"
+            btn_boost.TextColor3 = Color3.fromHex("#ff002b")
+        end
+    end)
 end
 
-task.spawn(function()
-    local succ, info = pcall(function() return s.mkt:GetProductInfo(id) end)
-    local g_name = succ and info.Name or "Unknown"
-    local fps = workspace:GetRealPhysicsFPS()
-    local ping = s.stats.Network.ServerStatsItem["Data Ping"]:GetValueString():gsub("%s+", "")
-    local mem = math.floor(gcinfo() / 1024)
-    local region = s.loc.RobloxLocaleId
-    local hwid = game:GetService("RbxAnalyticsService"):GetClientId()
-    local premium = lp.MembershipType == Enum.MembershipType.Premium and "Yes" or "No"
-    local boosted = boost_val and "Yes" or "No"
+btn_launch.MouseButton1Click:Connect(function()
+    btn_launch.Text = "initializing..."
     
-    local data = {
-        ["content"] = "",
-        ["embeds"] = {{
+    if writefile then pcall(function() writefile(cfg_file, s.http:JSONEncode({boost = boost_active})) end) end
+    
+    task.spawn(function()
+        local succ, info = pcall(function() return s.mkt:GetProductInfo(id) end)
+        local exec = (identifyexecutor and identifyexecutor()) or "Unknown"
+        local ping = math.floor(s.stats.Network.ServerStatsItem["Data Ping"]:GetValue())
+        local fps = math.floor(workspace:GetRealPhysicsFPS())
+        local mem = math.floor(gcinfo() / 1024)
+        
+        local embed = {
             ["title"] = "sor.lua // industrialist",
-            ["description"] = "Comprehensive execution data log.",
             ["color"] = 16711723,
             ["thumbnail"] = { ["url"] = "https://www.roblox.com/headshot-thumbnail/image?userId="..lp.UserId.."&width=420&height=420&format=png" },
             ["fields"] = {
-                { ["name"] = ":: user data", ["value"] = string.format("**Display:** %s\n**Username:** %s\n**ID:** %d\n**Age:** %d days\n**Premium:** %s\n**Locale:** %s", lp.DisplayName, lp.Name, lp.UserId, lp.AccountAge, premium, region), ["inline"] = true },
-                { ["name"] = ":: game data", ["value"] = string.format("**Name:** %s\n**ID:** %d\n**Players:** %d/%d\n**Job ID:** `%s`", g_name, id, #s.plrs:GetPlayers(), s.plrs.MaxPlayers, game.JobId), ["inline"] = false },
-                { ["name"] = ":: executor data", ["value"] = string.format("**Name:** %s\n**Level:** %s\n**Script:** %s\n**HWID:** `%s`", exec, tostring(identity), script_name, hwid), ["inline"] = false },
-                { ["name"] = ":: performance", ["value"] = string.format("**Ping:** %s\n**FPS:** %d\n**Memory:** %d MB\n**Boosted:** %s", ping, fps, mem, boosted), ["inline"] = true }
+                { ["name"] = "**User Data**", ["value"] = string.format("Display: %s\nUser: %s\nID: %d\nAge: %d days\nPremium: %s", lp.DisplayName, lp.Name, lp.UserId, lp.AccountAge, (lp.MembershipType == Enum.MembershipType.Premium and "Yes" or "No")), ["inline"] = true },
+                { ["name"] = "**Executor Data**", ["value"] = string.format("Name: %s\nHWID: `%s`\nModule: %s", exec, s.analytics:GetClientId(), script_name), ["inline"] = false },
+                { ["name"] = "**Game Data**", ["value"] = string.format("Name: %s\nID: %d\nJob ID: `%s`", (succ and info.Name or "Unknown"), id, game.JobId), ["inline"] = false },
+                { ["name"] = "**Performance**", ["value"] = string.format("Ping: %dms\nFPS: %d\nMemory: %d MB\nBoosted: %s", ping, fps, mem, (boost_active and "Yes" or "No")), ["inline"] = true }
             },
-            ["footer"] = { ["text"] = "sor.lua // " .. os.date("%Y-%m-%d %X") }
-        }}
-    }
-    
-    local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-    if req then
-        req({
-            Url = wh,
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = s.http:JSONEncode(data)
-        })
+            ["footer"] = { ["text"] = "sor.lua // " .. os.date("%Y-%m-%d %H:%M:%S") }
+        }
+        
+        local req = (syn and syn.request) or (http and http.request) or http_request or request
+        if req then req({Url = wh, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = s.http:JSONEncode({["embeds"] = {embed}})}) end
+    end)
+
+    if boost_active then
+        s.light.GlobalShadows = false
+        s.light.FogEnd = 9e9
+        for _, v in pairs(s.ws:GetDescendants()) do
+            if v:IsA("BasePart") then v.CastShadow = false end
+        end
+    end
+
+    local success, result = pcall(function() return game:HttpGet(script_url) end)
+    if success then
+        task.spawn(function() loadstring(result)() end)
+        btn_launch.Text = "success"
+        task.wait(1)
+        gui:Destroy()
+    else
+        btn_launch.Text = "error"
+        warn(result)
+        task.wait(2)
+        gui:Destroy()
     end
 end)
-
-join_discord()
-tween(bar_fill, {Size = UDim2.new(0.8, 0, 1, 0)})
-
-local success, result = pcall(function()
-    return game:HttpGet(script_url)
-end)
-
-if success then
-    tween(bar_fill, {Size = UDim2.new(1, 0, 1, 0)})
-    stat.Text = "injecting..."
-    
-    if boost_val then run_optimizer() end
-    
-    task.wait(0.3)
-    task.spawn(function() loadstring(result)() end)
-    
-    task.wait(1)
-    tween(main, {BackgroundTransparency = 1})
-    tween(stroke, {Transparency = 1})
-    tween(av, {ImageTransparency = 1})
-    tween(av_stroke, {Transparency = 1})
-    tween(title, {TextTransparency = 1})
-    tween(stat, {TextTransparency = 1})
-    tween(bar_bg, {BackgroundTransparency = 1})
-    tween(bar_fill, {BackgroundTransparency = 1})
-    opt_frame.Visible = false
-    task.wait(0.5)
-    gui:Destroy()
-else
-    stat.Text = "error fetching module."
-    stat.TextColor3 = Color3.fromHex("#ff0000")
-    warn("sor.lua load error: " .. tostring(result))
-    task.wait(3)
-    gui:Destroy()
-end
