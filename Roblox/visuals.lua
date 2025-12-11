@@ -1,17 +1,14 @@
--- sor.lua // visuals_engine_v1
--- architecture: drawing_api // dynamic_rigging
+-- sor.lua // visuals_engine_v2
+-- industrial_grade // drawing_api // crash_safe
 
-local sor_visuals = {
-    _registry = {},
-    _connections = {},
-    _config = {
+local sor_lib = {
+    registry = {},
+    config = {
         enabled = true,
+        render_dist = 3000,
         team_check = false,
-        render_dist = 2000,
-        refresh_rate = 0, -- 0 = renderstepped
-        font = 2, -- 0=UI, 1=System, 2=Plex, 3=Monospace
-        text_size = 13,
-        limit_text_width = true
+        font = 2, -- Plex
+        text_size = 13
     }
 }
 
@@ -23,390 +20,326 @@ local s = {
     wts = game:GetService("Workspace").CurrentCamera.WorldToViewportPoint
 }
 
-local Drawing = Drawing
-local Vector2 = Vector2.new
-local Vector3 = Vector3.new
-local Color3 = Color3.new
-local floor = math.floor
-local atan2 = math.atan2
-local cos = math.cos
-local sin = math.sin
-local pi = math.pi
+local Vector2, Vector3, Color3 = Vector2.new, Vector3.new, Color3.new
+local floor, rad, cos, sin, tan = math.floor, math.rad, math.cos, math.sin, math.tan
 
--- // drawing object pool
-local function create_draw(type, props)
+-- // SAFE DRAWING WRAPPER //
+local function NewDrawing(type, props)
+    if not Drawing then return nil end
     local obj = Drawing.new(type)
+    if not obj then return nil end
     for k, v in pairs(props) do obj[k] = v end
     return obj
 end
 
--- // class: entity
+local function SafeRemove(obj)
+    if not obj then return end
+    if type(obj) == "table" and not obj.Remove and not obj.Color then
+        -- Assume list of objects (like hat lines)
+        for _, v in pairs(obj) do 
+            if v and v.Remove then v:Remove() end 
+        end
+    elseif obj.Remove then
+        -- Single object
+        obj:Remove()
+    end
+end
+
+-- // ENTITY CLASS //
 local Entity = {}
 Entity.__index = Entity
 
-function Entity.new(model, config)
+function Entity.new(model, path_config)
     local self = setmetatable({}, Entity)
     self.model = model
-    self.config = config or {}
     
-    -- overrides for custom models
-    self.root_name = config.root_name or "HumanoidRootPart"
-    self.head_name = config.head_name or "Head"
-    self.hum_name = config.hum_name or "Humanoid"
+    -- Custom Model Support
+    self.root = path_config.root or "HumanoidRootPart"
+    self.head = path_config.head or "Head"
+    self.hum = path_config.hum or "Humanoid"
     
-    -- state
-    self.drawings = {
-        box = create_draw("Square", {Thickness = 1, Filled = false, ZIndex = 2}),
-        box_fill = create_draw("Square", {Thickness = 1, Filled = true, Transparency = 0.2, ZIndex = 1}),
-        box_outline = create_draw("Square", {Thickness = 3, Filled = false, ZIndex = 1, Color = Color3(0,0,0)}),
+    -- Canvas
+    self.canvas = {
+        -- Box
+        box = NewDrawing("Square", {Thickness=1.5, ZIndex=2, Filled=false}),
+        box_outline = NewDrawing("Square", {Thickness=2.5, ZIndex=1, Filled=false, Color=Color3(0,0,0)}),
+        box_fill = NewDrawing("Square", {Thickness=1, ZIndex=1, Filled=true, Transparency=0.25}),
         
-        name = create_draw("Text", {Center = true, Outline = true, ZIndex = 3}),
-        dist = create_draw("Text", {Center = true, Outline = true, ZIndex = 3}),
-        tool = create_draw("Text", {Center = true, Outline = true, ZIndex = 3}),
-        stats = create_draw("Text", {Center = false, Outline = true, ZIndex = 3}), -- Velocity/Health text
+        -- Text
+        name = NewDrawing("Text", {Center=true, Outline=true, Size=13, ZIndex=3}),
+        dist = NewDrawing("Text", {Center=true, Outline=true, Size=12, ZIndex=3}),
+        stats = NewDrawing("Text", {Center=false, Outline=true, Size=12, ZIndex=3}),
         
-        health_bar = create_draw("Square", {Thickness = 1, Filled = true, ZIndex = 2}),
-        health_outline = create_draw("Square", {Thickness = 1, Filled = true, ZIndex = 1, Color = Color3(0,0,0)}),
+        -- Health
+        bar = NewDrawing("Square", {Thickness=1, ZIndex=2, Filled=true}),
+        bar_outline = NewDrawing("Square", {Thickness=1, ZIndex=1, Filled=true, Color=Color3(0,0,0)}),
         
-        tracer = create_draw("Line", {Thickness = 1, ZIndex = 1}),
-        gaze = create_draw("Line", {Thickness = 1, ZIndex = 2}),
+        -- Tracers
+        tracer = NewDrawing("Line", {Thickness=1, ZIndex=1}),
         
-        skel_main = {}, -- table of lines
-        hat_lines = {}, -- table of lines (3d) or single triangle (2d)
+        -- 3D Elements
+        skel = {}, -- Array of lines
+        hat = {}, -- Array of lines
         
-        arrow = create_draw("Triangle", {Thickness = 1, Filled = true, ZIndex = 4})
+        -- Offscreen
+        arrow = NewDrawing("Triangle", {Thickness=1, Filled=true, ZIndex=4})
     }
-    
-    self.last_pos = Vector3(0,0,0)
-    self.velocity_mag = 0
-    self.last_update = os.clock()
     
     return self
 end
 
-function Entity:destruct()
-    for _, v in pairs(self.drawings) do
-        if type(v) == "table" and not v.Remove then
-            for _, line in pairs(v) do line:Remove() end
-        else
-            v:Remove()
-        end
+function Entity:Destruct()
+    if not self.canvas then return end
+    for _, obj in pairs(self.canvas) do
+        SafeRemove(obj)
     end
-    self.drawings = nil
+    self.canvas = nil
 end
 
-function Entity:get_part(name)
+function Entity:GetPart(name)
     return self.model:FindFirstChild(name)
 end
 
-function Entity:get_health()
-    local hum = self.model:FindFirstChild(self.hum_name)
-    if hum then return hum.Health, hum.MaxHealth end
-    return 100, 100 -- fallback
-end
-
-function Entity:is_alive()
-    local h, max = self:get_health()
-    return h > 0 and self.model.Parent ~= nil
-end
-
--- // math: 3d bounding box calc
-function Entity:get_bounds(root, parts)
-    local min_x, min_y, max_x, max_y = 9e9, 9e9, -9e9, -9e9
+function Entity:Update(cfg)
+    if not self.model or not self.model.Parent then return false end
     
-    for _, part in pairs(parts) do
-        if part:IsA("BasePart") then
-            local size = part.Size
-            local cf = part.CFrame
-            
-            local corners = {
-                cf * Vector3(size.X/2, size.Y/2, size.Z/2),
-                cf * Vector3(-size.X/2, size.Y/2, size.Z/2),
-                cf * Vector3(size.X/2, -size.Y/2, size.Z/2),
-                cf * Vector3(-size.X/2, -size.Y/2, size.Z/2),
-                cf * Vector3(size.X/2, size.Y/2, -size.Z/2),
-                cf * Vector3(-size.X/2, size.Y/2, -size.Z/2),
-                cf * Vector3(size.X/2, -size.Y/2, -size.Z/2),
-                cf * Vector3(-size.X/2, -size.Y/2, -size.Z/2),
-            }
-            
-            for _, corner in pairs(corners) do
-                local pos, vis = s.wts(s.cam, corner)
-                if vis then
-                    if pos.X < min_x then min_x = pos.X end
-                    if pos.Y < min_y then min_y = pos.Y end
-                    if pos.X > max_x then max_x = pos.X end
-                    if pos.Y > max_y then max_y = pos.Y end
-                end
-            end
-        end
-    end
+    local root_part = self:GetPart(self.root)
+    local hum = self:GetPart(self.hum)
+    local head_part = self:GetPart(self.head)
     
-    return min_x, min_y, max_x, max_y
-end
-
-function Entity:update(settings)
-    if not self.model or not self.model.Parent then 
-        self:destruct()
-        return false 
-    end
-
-    local root = self:get_part(self.root_name)
-    local head = self:get_part(self.head_name)
-    local hum = self.model:FindFirstChild(self.hum_name)
-    
-    -- visibility reset
-    local function set_vis(state)
-        for _, v in pairs(self.drawings) do
+    -- Function to hide all
+    local function Hide()
+        if not self.canvas then return end
+        for k, v in pairs(self.canvas) do
             if type(v) == "table" and not v.Remove then
-                for _, l in pairs(v) do l.Visible = state end
-            else
-                v.Visible = state
+                for _, l in pairs(v) do l.Visible = false end
+            elseif v.Remove then
+                v.Visible = false
             end
         end
     end
     
-    if not root or not self:is_alive() then 
-        set_vis(false)
-        return true 
-    end
-
-    -- logic: velocity
-    local curr_time = os.clock()
-    local delta = curr_time - self.last_update
-    if delta > 0.1 then
-        self.velocity_mag = (root.Position - self.last_pos).Magnitude / delta
-        self.last_pos = root.Position
-        self.last_update = curr_time
-    end
-
-    -- logic: screen projection
-    local root_pos, root_vis = s.wts(s.cam, root.Position)
-    local head_pos = head and s.wts(s.cam, head.Position) or root_pos
-    local dist = (s.cam.CFrame.Position - root.Position).Magnitude
+    if not root_part then Hide(); return true end
     
-    -- check: distance & team
-    if dist > settings.render_dist then set_vis(false); return true end
-    
-    -- check: team
-    if settings.team_check then
+    -- Team Check
+    if cfg.team_check then
         local plr = s.plrs:GetPlayerFromCharacter(self.model)
-        if plr and plr.Team == s.plrs.LocalPlayer.Team then
-            set_vis(false); return true
+        local lp = s.plrs.LocalPlayer
+        if plr and lp and plr.Team == lp.Team then
+            Hide(); return true
         end
     end
 
-    -- render: offscreen arrow
-    if settings.features.offscreen_arrows and not root_vis then
-        local relative = s.cam.CFrame:PointToObjectSpace(root.Position)
-        local angle = atan2(relative.Y, relative.X) + pi/2
-        
-        -- arrow logic
-        local center = Vector2(s.cam.ViewportSize.X/2, s.cam.ViewportSize.Y/2)
-        local radius = 300
-        local arrow_pos = center + Vector2(cos(angle)*radius, sin(angle)*radius)
-        
-        self.drawings.arrow.PointA = arrow_pos + Vector2(cos(angle)*20, sin(angle)*20)
-        self.drawings.arrow.PointB = arrow_pos + Vector2(cos(angle - 0.5)*10, sin(angle - 0.5)*10)
-        self.drawings.arrow.PointC = arrow_pos + Vector2(cos(angle + 0.5)*10, sin(angle + 0.5)*10)
-        self.drawings.arrow.Color = settings.colors.arrow
-        self.drawings.arrow.Visible = true
-        
-        -- hide others
-        for k,v in pairs(self.drawings) do if k ~= "arrow" then if type(v)=="table" then for _,l in pairs(v) do l.Visible=false end else v.Visible=false end end end
+    -- Calculations
+    local root_pos = root_part.Position
+    local screen_pos, on_screen = s.wts(s.cam, root_pos)
+    local dist = (s.cam.CFrame.Position - root_pos).Magnitude
+    
+    if dist > cfg.render_dist then Hide(); return true end
+
+    -- Offscreen Arrows
+    if not on_screen and cfg.features.arrows then
+        Hide() -- Hide regular esp
+        local arrow = self.canvas.arrow
+        if arrow then
+            local center = Vector2(s.cam.ViewportSize.X/2, s.cam.ViewportSize.Y/2)
+            local rel = s.cam.CFrame:PointToObjectSpace(root_pos)
+            local ang = math.atan2(rel.Y, rel.X) + math.pi/2
+            local rad = 250
+            
+            local direction = Vector2(cos(ang), sin(ang))
+            local pos = center + (direction * rad)
+            
+            -- Arrow Triangle Logic
+            local a_size = 18
+            local split = 0.5
+            
+            arrow.PointA = pos + (direction * a_size)
+            arrow.PointB = pos + (Vector2(cos(ang - split), sin(ang - split)) * (a_size * 0.4))
+            arrow.PointC = pos + (Vector2(cos(ang + split), sin(ang + split)) * (a_size * 0.4))
+            arrow.Color = cfg.colors.arrow
+            arrow.Visible = true
+        end
         return true
-    else
-        self.drawings.arrow.Visible = false
     end
 
-    if not root_vis then set_vis(false); return true end
+    if not on_screen then Hide(); return true end
+    if self.canvas.arrow then self.canvas.arrow.Visible = false end
 
-    -- logic: bounding box
-    local min_x, min_y, max_x, max_y = self:get_bounds(root, self.model:GetChildren())
-    local height = max_y - min_y
-    local width = max_x - min_x
-
-    -- render: box
-    if settings.features.box then
-        local box = self.drawings.box
-        local outline = self.drawings.box_outline
-        
-        box.Size = Vector2(width, height)
-        box.Position = Vector2(min_x, min_y)
-        box.Color = settings.colors.box
-        box.Visible = true
-        
-        outline.Size = Vector2(width, height)
-        outline.Position = Vector2(min_x, min_y)
-        outline.Visible = true
-        
-        if settings.features.box_fill then
-            local fill = self.drawings.box_fill
-            fill.Size = Vector2(width, height)
-            fill.Position = Vector2(min_x, min_y)
-            fill.Color = settings.colors.box
-            fill.Visible = true
-        end
-    else
-        self.drawings.box.Visible = false
-        self.drawings.box_outline.Visible = false
-        self.drawings.box_fill.Visible = false
-    end
-
-    -- render: health
-    if settings.features.health_bar then
-        local hp, max = self:get_health()
-        local pct = math.clamp(hp/max, 0, 1)
-        local bar_h = height * pct
-        
-        local bar = self.drawings.health_bar
-        local out = self.drawings.health_outline
-        
-        bar.Position = Vector2(min_x - 6, max_y - bar_h)
-        bar.Size = Vector2(3, bar_h)
-        bar.Color = Color3(1-pct, pct, 0) -- red to green lerp
-        bar.Visible = true
-        
-        out.Position = Vector2(min_x - 7, min_y - 1)
-        out.Size = Vector2(5, height + 2)
-        out.Visible = true
-        
-        if settings.features.health_text then
-            local txt = self.drawings.stats
-            txt.Text = floor(hp) .. " HP"
-            txt.Position = Vector2(min_x - 30, min_y)
-            txt.Color = bar.Color
-            txt.Size = settings.text_size
-            txt.Font = settings.font
-            txt.Visible = true
-        end
-    else
-        self.drawings.health_bar.Visible = false
-        self.drawings.health_outline.Visible = false
-        self.drawings.stats.Visible = false
-    end
-
-    -- render: name & info
-    if settings.features.name then
-        local n = self.drawings.name
-        n.Text = self.model.Name
-        if self.model:FindFirstChild("Humanoid") and self.model.Humanoid.DisplayName ~= "" then
-            n.Text = self.model.Humanoid.DisplayName
-        end
-        n.Position = Vector2(min_x + width/2, min_y - 18)
-        n.Color = settings.colors.name
-        n.Size = settings.text_size
-        n.Font = settings.font
-        n.Visible = true
-    end
-
-    if settings.features.distance then
-        local d = self.drawings.dist
-        d.Text = "[" .. floor(dist) .. "m]"
-        d.Position = Vector2(min_x + width/2, max_y + 4)
-        d.Color = settings.colors.distance
-        d.Size = settings.text_size - 1
-        d.Font = settings.font
-        d.Visible = true
+    -- Bounding Box Math
+    local min_x, min_y = 9e9, 9e9
+    local max_x, max_y = -9e9, -9e9
+    
+    local parts = {root_part, head_part} -- Optimization: Only calculate bounds based on Root+Head (faster) or use GetChildren for precision
+    -- For full rigs, calculating every part is heavy. Let's do a dynamic size estimation based on RootPart size
+    
+    local size = root_part.Size
+    local corners = {
+        Vector3(size.X/2, size.Y/2 + 2, size.Z/2), -- Estimated height padding
+        Vector3(-size.X/2, -size.Y/2 - 1.5, -size.Z/2)
+    }
+    
+    -- Project corners
+    for _, offset in pairs(corners) do
+        local world = root_part.CFrame:PointToWorldSpace(offset)
+        local screen = s.wts(s.cam, world)
+        min_x = math.min(min_x, screen.X)
+        min_y = math.min(min_y, screen.Y)
+        max_x = math.max(max_x, screen.X)
+        max_y = math.max(max_y, screen.Y)
     end
     
-    if settings.features.velocity then
-        local v_txt = self.drawings.tool -- reusing tool slot for secondary info if needed, or add logic
-        -- extending stats text instead
-        local old = self.drawings.stats.Text
-        if settings.features.health_text then
-            self.drawings.stats.Text = old .. "\n" .. floor(self.velocity_mag) .. " SPS"
-        else
-            self.drawings.stats.Text = floor(self.velocity_mag) .. " SPS"
-            self.drawings.stats.Position = Vector2(min_x - 40, min_y)
-            self.drawings.stats.Visible = true
-            self.drawings.stats.Color = settings.colors.stats
-        end
-    end
+    local w = max_x - min_x
+    local h = max_y - min_y
+    local box_size = Vector2(w, h)
+    local box_pos = Vector2(min_x, min_y)
 
-    -- render: tracer
-    if settings.features.tracers then
-        local t = self.drawings.tracer
-        local origin = Vector2(s.cam.ViewportSize.X/2, s.cam.ViewportSize.Y) -- Bottom center
-        if settings.features.tracer_origin == "Mouse" then origin = s.uis:GetMouseLocation() end
-        if settings.features.tracer_origin == "Center" then origin = Vector2(s.cam.ViewportSize.X/2, s.cam.ViewportSize.Y/2) end
+    -- RENDER: Box
+    if cfg.features.box then
+        self.canvas.box.Size = box_size
+        self.canvas.box.Position = box_pos
+        self.canvas.box.Color = cfg.colors.box
+        self.canvas.box.Visible = true
         
-        t.From = origin
-        t.To = Vector2(min_x + width/2, max_y)
-        t.Color = settings.colors.tracer
-        t.Visible = true
+        self.canvas.box_outline.Size = box_size
+        self.canvas.box_outline.Position = box_pos
+        self.canvas.box_outline.Visible = true
+        
+        if cfg.features.fill then
+            self.canvas.box_fill.Size = box_size
+            self.canvas.box_fill.Position = box_pos
+            self.canvas.box_fill.Color = cfg.colors.box
+            self.canvas.box_fill.Visible = true
+        else self.canvas.box_fill.Visible = false end
     else
-        self.drawings.tracer.Visible = false
+        self.canvas.box.Visible = false
+        self.canvas.box_outline.Visible = false
+        self.canvas.box_fill.Visible = false
+    end
+    
+    -- RENDER: Name
+    if cfg.features.name then
+        self.canvas.name.Text = self.model.Name
+        if hum and hum.DisplayName ~= "" then self.canvas.name.Text = hum.DisplayName end
+        self.canvas.name.Position = Vector2(min_x + w/2, min_y - 16)
+        self.canvas.name.Color = cfg.colors.name
+        self.canvas.name.Visible = true
+    else self.canvas.name.Visible = false end
+
+    -- RENDER: Distance
+    if cfg.features.distance then
+        self.canvas.dist.Text = "[" .. math.floor(dist) .. "s]" -- Studs
+        self.canvas.dist.Position = Vector2(min_x + w/2, max_y + 2)
+        self.canvas.dist.Color = cfg.colors.dist
+        self.canvas.dist.Visible = true
+    else self.canvas.dist.Visible = false end
+
+    -- RENDER: Health
+    if cfg.features.health and hum then
+        local hp, max = hum.Health, hum.MaxHealth
+        local pct = math.clamp(hp/max, 0, 1)
+        local bar_h = h * pct
+        
+        self.canvas.bar.Size = Vector2(2, bar_h)
+        self.canvas.bar.Position = Vector2(min_x - 5, max_y - bar_h)
+        self.canvas.bar.Color = Color3.fromHSV(pct * 0.33, 1, 1) -- Dynamic Green->Red
+        self.canvas.bar.Visible = true
+        
+        self.canvas.bar_outline.Size = Vector2(4, h + 2)
+        self.canvas.bar_outline.Position = Vector2(min_x - 6, min_y - 1)
+        self.canvas.bar_outline.Visible = true
+    else
+        self.canvas.bar.Visible = false
+        self.canvas.bar_outline.Visible = false
     end
 
-    -- render: chinese hat (3d cone)
-    if settings.features.chinese_hat and head then
-        local top = head.Position + Vector3(0, 1.5, 0)
-        local top_wts, top_vis = s.wts(s.cam, top)
+    -- RENDER: Tracer
+    if cfg.features.tracer then
+        self.canvas.tracer.From = Vector2(s.cam.ViewportSize.X/2, s.cam.ViewportSize.Y)
+        self.canvas.tracer.To = Vector2(min_x + w/2, max_y)
+        self.canvas.tracer.Color = cfg.colors.tracer
+        self.canvas.tracer.Visible = true
+    else self.canvas.tracer.Visible = false end
+
+    -- RENDER: Chinese Hat (3D)
+    if cfg.features.hat and head_part then
+        local center = head_part.Position + Vector3(0, 1.2, 0)
+        local radius = 1.5
+        local segments = 12
+        local points = {}
         
+        -- Calculate points
+        for i=1, segments do
+            local angle = math.rad((i/segments) * 360 + (os.clock() * 50)) -- Spin effect
+            local off = Vector3(math.cos(angle)*radius, -0.5, math.sin(angle)*radius)
+            local p, v = s.wts(s.cam, center + off)
+            if v then table.insert(points, Vector2(p.X, p.Y)) else table.insert(points, nil) end
+        end
+        local top, top_vis = s.wts(s.cam, center + Vector3(0, 0.5, 0))
+
         if top_vis then
-            local points = {}
-            local radius = 1.5
-            for i = 1, 8 do
-                local angle = (i/8) * pi * 2
-                local offset = Vector3(cos(angle)*radius, -0.5, sin(angle)*radius)
-                local p_wts = s.wts(s.cam, top + offset)
-                table.insert(points, Vector2(p_wts.X, p_wts.Y))
-            end
-            
-            -- manage lines
-            for i = 1, 8 do
-                if not self.drawings.hat_lines[i] then
-                    self.drawings.hat_lines[i] = create_draw("Line", {Thickness = 1, Transparency = 0.8})
-                end
+            for i=1, segments do
+                local p1 = points[i]
+                local p2 = points[(i % segments) + 1]
                 
-                local l = self.drawings.hat_lines[i]
-                l.From = Vector2(top_wts.X, top_wts.Y)
-                l.To = points[i]
-                l.Color = settings.colors.hat
-                l.Visible = true
+                -- Lazy init lines
+                if not self.canvas.hat[i] then self.canvas.hat[i] = NewDrawing("Line", {Thickness=1}) end
+                if not self.canvas.hat[i+segments] then self.canvas.hat[i+segments] = NewDrawing("Line", {Thickness=1}) end
                 
-                -- connect base
-                if not self.drawings.hat_lines[i+8] then
-                    self.drawings.hat_lines[i+8] = create_draw("Line", {Thickness = 1, Transparency = 0.8})
+                local l1 = self.canvas.hat[i] -- Base
+                local l2 = self.canvas.hat[i+segments] -- Spike to top
+                
+                if p1 and p2 then
+                    l1.From = p1
+                    l1.To = p2
+                    l1.Color = cfg.colors.hat
+                    l1.Visible = true
+                    
+                    l2.From = p1
+                    l2.To = Vector2(top.X, top.Y)
+                    l2.Color = cfg.colors.hat
+                    l2.Visible = true
+                else
+                    l1.Visible = false
+                    l2.Visible = false
                 end
-                local base = self.drawings.hat_lines[i+8]
-                base.From = points[i]
-                base.To = points[(i%8)+1]
-                base.Color = settings.colors.hat
-                base.Visible = true
             end
         end
     else
-        for _, l in pairs(self.drawings.hat_lines) do l.Visible = false end
+        for _, l in pairs(self.canvas.hat) do l.Visible = false end
     end
-
+    
     return true
 end
 
--- // api
-function sor_visuals.Add(model, config)
-    local ent = Entity.new(model, config)
-    sor_visuals._registry[model] = ent
-    return ent
+-- // INTERFACE //
+function sor_lib.Add(model, path_cfg)
+    if sor_lib.registry[model] then sor_lib.registry[model]:Destruct() end
+    sor_lib.registry[model] = Entity.new(model, path_cfg)
 end
 
-function sor_visuals.Remove(model)
-    if sor_visuals._registry[model] then
-        sor_visuals._registry[model]:destruct()
-        sor_visuals._registry[model] = nil
+function sor_lib.Remove(model)
+    if sor_lib.registry[model] then
+        sor_lib.registry[model]:Destruct()
+        sor_lib.registry[model] = nil
     end
 end
 
-function sor_visuals.Start(settings)
-    sor_visuals._config = settings
+function sor_lib.Init(cfg)
+    sor_lib.config = cfg
     s.rs.RenderStepped:Connect(function()
-        if not sor_visuals._config.enabled then return end
-        for model, ent in pairs(sor_visuals._registry) do
-            local success = pcall(function() ent:update(sor_visuals._config) end)
-            if not success then ent:destruct(); sor_visuals._registry[model] = nil end
+        if not sor_lib.config.enabled then return end
+        for model, entity in pairs(sor_lib.registry) do
+            local s, err = pcall(function() 
+                local keep = entity:Update(sor_lib.config) 
+                if not keep then sor_lib.Remove(model) end
+            end)
+            if not s then 
+                -- Fail silently and cleanup to prevent spam
+                sor_lib.Remove(model) 
+            end
         end
     end)
 end
 
-return sor_visuals
+return sor_lib
