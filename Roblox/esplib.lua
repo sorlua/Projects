@@ -139,27 +139,34 @@ function CustomESP.Add(target, userOptions)
         end
     end
 
-    if options.Features.Box then
-        esp.Drawings.Box = CreateDrawing("Square")
-        esp.Drawings.Box.Thickness = 1
-    end
+    if options.Features.Box or options.Features.FilledBox or options.Features.Outline then
+        -- Normal box (outline only now)
+        if options.Features.Box then
+            esp.Drawings.Box = CreateDrawing("Square")
+            esp.Drawings.Box.Filled = false
+        end
 
-    if options.Features.FilledBox then
-        esp.Drawings.FilledBox = CreateDrawing("Square")
-        esp.Drawings.FilledBox.Filled = true
-        esp.Drawings.FilledBox.Transparency = 0.5
-    end
+        -- Filled background
+        if options.Features.FilledBox then
+            esp.Drawings.FilledBox = CreateDrawing("Square")
+            esp.Drawings.FilledBox.Filled = true
+            esp.Drawings.FilledBox.Transparency = 0.15
+        end
 
-    if options.Features.Outline then
-        esp.Drawings.Outline = CreateDrawing("Square")
-        esp.Drawings.Outline.Thickness = 3
+        -- Black outline using slightly larger square
+        if options.Features.Outline then
+            esp.Drawings.Outline = CreateDrawing("Square")
+            esp.Drawings.Outline.Filled = false
+            esp.Drawings.Outline.Color = Color3.new(0, 0, 0)
+        end
     end
 
     if options.Features.CornerBox then
         esp.Drawings.CornerLines = {}
         for i = 1, 8 do
-            esp.Drawings.CornerLines[i] = CreateDrawing("Line")
-            esp.Drawings.CornerLines[i].Thickness = 1
+            local line = CreateDrawing("Line")
+            line.Thickness = 2
+            table.insert(esp.Drawings.CornerLines, line)
         end
     end
 
@@ -434,28 +441,33 @@ local function UpdateESP(esp)
         return
     end
 
-    if esp.Drawings.Box then
-        esp.Drawings.Box.Position = boxPos
-        esp.Drawings.Box.Size = boxSize
-        esp.Drawings.Box.Color = esp.Options.Colors.Box or baseColor
-        esp.Drawings.Box.Transparency = transparency
-        esp.Drawings.Box.Visible = true
-    end
+    if esp.Drawings.Box or esp.Drawings.FilledBox or esp.Drawings.Outline then
+        local offset = esp.Drawings.Outline and 2 or 0
+        local outlinePos = boxPos - Vector2.new(offset, offset)
+        local outlineSize = boxSize + Vector2.new(offset * 2, offset * 2)
 
-    if esp.Drawings.FilledBox then
-        esp.Drawings.FilledBox.Position = boxPos
-        esp.Drawings.FilledBox.Size = boxSize
-        esp.Drawings.FilledBox.Color = esp.Options.Colors.Box or baseColor
-        esp.Drawings.FilledBox.Transparency = transparency * 0.5
-        esp.Drawings.FilledBox.Visible = true
-    end
+        if esp.Drawings.Outline then
+            esp.Drawings.Outline.Position = outlinePos
+            esp.Drawings.Outline.Size = outlineSize
+            esp.Drawings.Outline.Transparency = transparency
+            esp.Drawings.Outline.Visible = true
+        end
 
-    if esp.Drawings.Outline then
-        esp.Drawings.Outline.Position = boxPos - Vector2.new(1, 1)
-        esp.Drawings.Outline.Size = boxSize + Vector2.new(2, 2)
-        esp.Drawings.Outline.Color = Color3.new(0, 0, 0)
-        esp.Drawings.Outline.Transparency = transparency
-        esp.Drawings.Outline.Visible = true
+        if esp.Drawings.FilledBox then
+            esp.Drawings.FilledBox.Position = boxPos
+            esp.Drawings.FilledBox.Size = boxSize
+            esp.Drawings.FilledBox.Color = esp.Options.Colors.Box
+            esp.Drawings.FilledBox.Transparency = transparency * 0.15
+            esp.Drawings.FilledBox.Visible = true
+        end
+
+        if esp.Drawings.Box then
+            esp.Drawings.Box.Position = boxPos
+            esp.Drawings.Box.Size = boxSize
+            esp.Drawings.Box.Color = esp.Options.Colors.Box or baseColor
+            esp.Drawings.Box.Transparency = transparency
+            esp.Drawings.Box.Visible = true
+        end
     end
 
     if esp.Drawings.CornerLines then
