@@ -1,321 +1,367 @@
--- sor.lua // visuals_engine_v2
--- industrial_grade // drawing_api // crash_safe
+-- sor.lua // visuals_engine_v3
+-- industrial // recursive_gc // drawing_api
 
 local sor_lib = {
     registry = {},
     config = {
         enabled = true,
-        render_dist = 3000,
+        render_dist = 2500,
         team_check = false,
         font = 2, -- Plex
-        text_size = 13
+        text_size = 13,
+        limit_text_width = false
     }
 }
 
+-- // CACHE //
 local s = {
     rs = game:GetService("RunService"),
     ws = game:GetService("Workspace"),
     plrs = game:GetService("Players"),
-    cam = game:GetService("Workspace").CurrentCamera,
-    wts = game:GetService("Workspace").CurrentCamera.WorldToViewportPoint
+    cam = workspace.CurrentCamera,
+    wts = workspace.CurrentCamera.WorldToViewportPoint,
+    v2 = Vector2.new,
+    v3 = Vector3.new,
+    c3 = Color3.new,
+    cf = CFrame.new,
+    rad = math.rad,
+    cos = math.cos,
+    sin = math.sin,
+    floor = math.floor,
+    abs = math.abs,
+    max = math.max
 }
 
-local Vector2, Vector3, Color3 = Vector2.new, Vector3.new, Color3.new
-local floor, rad, cos, sin, tan = math.floor, math.rad, math.cos, math.sin, math.tan
-
--- // SAFE DRAWING WRAPPER //
-local function NewDrawing(type, props)
-    if not Drawing then return nil end
-    local obj = Drawing.new(type)
-    if not obj then return nil end
-    for k, v in pairs(props) do obj[k] = v end
-    return obj
+-- // MEMORY MANAGEMENT //
+local function IsDrawing(obj)
+    -- Robust check for drawing objects across different executors
+    return obj and (typeof(obj) == "userdata" or typeof(obj) == "table") and rawget(obj, "Remove") ~= nil
 end
 
 local function SafeRemove(obj)
     if not obj then return end
-    if type(obj) == "table" and not obj.Remove and not obj.Color then
-        -- Assume list of objects (like hat lines)
-        for _, v in pairs(obj) do 
-            if v and v.Remove then v:Remove() end 
-        end
-    elseif obj.Remove then
-        -- Single object
+
+    -- Case 1: Standard Drawing Object
+    if IsDrawing(obj) then
         obj:Remove()
+        return
     end
+
+    -- Case 2: Table/Container (Recursive Clean)
+    if type(obj) == "table" then
+        for i, v in pairs(obj) do
+            SafeRemove(v)
+            obj[i] = nil
+        end
+    end
+end
+
+local function NewDraw(type, props)
+    local obj = Drawing.new(type)
+    if not obj then return nil end
+    
+    for k, v in pairs(props) do
+        obj[k] = v
+    end
+    return obj
 end
 
 -- // ENTITY CLASS //
 local Entity = {}
 Entity.__index = Entity
 
-function Entity.new(model, path_config)
+function Entity.new(model, paths)
     local self = setmetatable({}, Entity)
     self.model = model
+    self.paths = paths or {root = "HumanoidRootPart", head = "Head", hum = "Humanoid"}
     
-    -- Custom Model Support
-    self.root = path_config.root or "HumanoidRootPart"
-    self.head = path_config.head or "Head"
-    self.hum = path_config.hum or "Humanoid"
-    
-    -- Canvas
+    self.last_pos = s.v3(0,0,0)
+    self.last_tick = os.clock()
+    self.vel = 0
+
+    -- Canvas Container
     self.canvas = {
-        -- Box
-        box = NewDrawing("Square", {Thickness=1.5, ZIndex=2, Filled=false}),
-        box_outline = NewDrawing("Square", {Thickness=2.5, ZIndex=1, Filled=false, Color=Color3(0,0,0)}),
-        box_fill = NewDrawing("Square", {Thickness=1, ZIndex=1, Filled=true, Transparency=0.25}),
+        -- 2D Box
+        box = NewDraw("Square", {Thickness = 1.5, ZIndex = 2, Filled = false}),
+        box_out = NewDraw("Square", {Thickness = 2.5, ZIndex = 1, Filled = false, Color = s.c3(0,0,0)}),
+        box_fill = NewDraw("Square", {Thickness = 1, ZIndex = 1, Filled = true, Transparency = 0.4}),
+
+        -- Indicators
+        name = NewDraw("Text", {Center = true, Outline = true, Size = 13, ZIndex = 3}),
+        dist = NewDraw("Text", {Center = true, Outline = true, Size = 12, ZIndex = 3}),
+        info = NewDraw("Text", {Center = false, Outline = true, Size = 12, ZIndex = 3}),
         
-        -- Text
-        name = NewDrawing("Text", {Center=true, Outline=true, Size=13, ZIndex=3}),
-        dist = NewDrawing("Text", {Center=true, Outline=true, Size=12, ZIndex=3}),
-        stats = NewDrawing("Text", {Center=false, Outline=true, Size=12, ZIndex=3}),
+        -- Status
+        bar = NewDraw("Square", {Thickness = 1, ZIndex = 2, Filled = true}),
+        bar_out = NewDraw("Square", {Thickness = 1, ZIndex = 1, Filled = true, Color = s.c3(0,0,0)}),
         
-        -- Health
-        bar = NewDrawing("Square", {Thickness=1, ZIndex=2, Filled=true}),
-        bar_outline = NewDrawing("Square", {Thickness=1, ZIndex=1, Filled=true, Color=Color3(0,0,0)}),
+        -- Visuals
+        tracer = NewDraw("Line", {Thickness = 1, ZIndex = 1}),
+        arrow = NewDraw("Triangle", {Thickness = 1, Filled = true, ZIndex = 4}),
         
-        -- Tracers
-        tracer = NewDrawing("Line", {Thickness=1, ZIndex=1}),
-        
-        -- 3D Elements
-        skel = {}, -- Array of lines
-        hat = {}, -- Array of lines
-        
-        -- Offscreen
-        arrow = NewDrawing("Triangle", {Thickness=1, Filled=true, ZIndex=4})
+        -- Complex Structures (Tables)
+        hat = {}, -- 3D Cone Lines
+        skel = {} -- Skeleton Lines
     }
     
     return self
 end
 
 function Entity:Destruct()
-    if not self.canvas then return end
-    for _, obj in pairs(self.canvas) do
-        SafeRemove(obj)
-    end
+    -- Recursive cleanup via SafeRemove
+    SafeRemove(self.canvas)
     self.canvas = nil
+    self.model = nil
 end
 
 function Entity:GetPart(name)
+    if not self.model then return nil end
     return self.model:FindFirstChild(name)
 end
 
 function Entity:Update(cfg)
     if not self.model or not self.model.Parent then return false end
-    
-    local root_part = self:GetPart(self.root)
-    local hum = self:GetPart(self.hum)
-    local head_part = self:GetPart(self.head)
-    
-    -- Function to hide all
-    local function Hide()
+
+    local root = self:GetPart(self.paths.root)
+    local head = self:GetPart(self.paths.head)
+    local hum = self:GetPart(self.paths.hum)
+
+    -- Visibility Toggle Helper
+    local function SetVisible(state)
         if not self.canvas then return end
+        
+        -- Iterate canvas manually to handle visibility
         for k, v in pairs(self.canvas) do
-            if type(v) == "table" and not v.Remove then
-                for _, l in pairs(v) do l.Visible = false end
-            elseif v.Remove then
-                v.Visible = false
+            if IsDrawing(v) then
+                v.Visible = state
+            elseif type(v) == "table" then
+                for _, sub in pairs(v) do
+                    if IsDrawing(sub) then sub.Visible = state end
+                end
             end
         end
     end
-    
-    if not root_part then Hide(); return true end
-    
-    -- Team Check
+
+    if not root then 
+        SetVisible(false)
+        return true 
+    end
+
+    -- Velocity Calc
+    local tick = os.clock()
+    if tick - self.last_tick > 0.1 then
+        self.vel = (root.Position - self.last_pos).Magnitude / (tick - self.last_tick)
+        self.last_pos = root.Position
+        self.last_tick = tick
+    end
+
+    -- Checks
     if cfg.team_check then
-        local plr = s.plrs:GetPlayerFromCharacter(self.model)
-        local lp = s.plrs.LocalPlayer
-        if plr and lp and plr.Team == lp.Team then
-            Hide(); return true
+        local p = s.plrs:GetPlayerFromCharacter(self.model)
+        if p and p.Team == s.plrs.LocalPlayer.Team then
+            SetVisible(false)
+            return true
         end
     end
 
-    -- Calculations
-    local root_pos = root_part.Position
-    local screen_pos, on_screen = s.wts(s.cam, root_pos)
-    local dist = (s.cam.CFrame.Position - root_pos).Magnitude
-    
-    if dist > cfg.render_dist then Hide(); return true end
+    -- Projection
+    local pos, vis = s.wts(s.cam, root.Position)
+    local dist = (s.cam.CFrame.Position - root.Position).Magnitude
 
-    -- Offscreen Arrows
-    if not on_screen and cfg.features.arrows then
-        Hide() -- Hide regular esp
-        local arrow = self.canvas.arrow
-        if arrow then
-            local center = Vector2(s.cam.ViewportSize.X/2, s.cam.ViewportSize.Y/2)
-            local rel = s.cam.CFrame:PointToObjectSpace(root_pos)
-            local ang = math.atan2(rel.Y, rel.X) + math.pi/2
-            local rad = 250
-            
-            local direction = Vector2(cos(ang), sin(ang))
-            local pos = center + (direction * rad)
-            
-            -- Arrow Triangle Logic
-            local a_size = 18
-            local split = 0.5
-            
-            arrow.PointA = pos + (direction * a_size)
-            arrow.PointB = pos + (Vector2(cos(ang - split), sin(ang - split)) * (a_size * 0.4))
-            arrow.PointC = pos + (Vector2(cos(ang + split), sin(ang + split)) * (a_size * 0.4))
-            arrow.Color = cfg.colors.arrow
-            arrow.Visible = true
-        end
+    if dist > cfg.render_dist then
+        SetVisible(false)
         return true
     end
 
-    if not on_screen then Hide(); return true end
-    if self.canvas.arrow then self.canvas.arrow.Visible = false end
+    -- Offscreen Arrows
+    if not vis and cfg.features.arrows then
+        SetVisible(false) -- Hide main esp
+        
+        local center = s.v2(s.cam.ViewportSize.X / 2, s.cam.ViewportSize.Y / 2)
+        local rel = s.cam.CFrame:PointToObjectSpace(root.Position)
+        local ang = math.atan2(rel.Y, rel.X) + math.pi / 2
+        local rad = 300
+        
+        local dir = s.v2(s.cos(ang), s.sin(ang))
+        local arrow_pos = center + (dir * rad)
+        
+        -- Draw Triangle
+        local scale = 16
+        local width = 0.6
+        
+        local a = arrow_pos + (dir * scale)
+        local b = arrow_pos + (s.v2(s.cos(ang - width), s.sin(ang - width)) * (scale * 0.5))
+        local c = arrow_pos + (s.v2(s.cos(ang + width), s.sin(ang + width)) * (scale * 0.5))
+        
+        self.canvas.arrow.PointA = a
+        self.canvas.arrow.PointB = b
+        self.canvas.arrow.PointC = c
+        self.canvas.arrow.Color = cfg.colors.arrow
+        self.canvas.arrow.Visible = true
+        return true
+    else
+        self.canvas.arrow.Visible = false
+    end
+
+    if not vis then
+        SetVisible(false)
+        return true
+    end
 
     -- Bounding Box Math
-    local min_x, min_y = 9e9, 9e9
-    local max_x, max_y = -9e9, -9e9
+    local r_size = root.Size
+    local tl = s.wts(s.cam, (root.CFrame * s.cf(r_size.X, r_size.Y + 1.2, 0)).Position)
+    local bl = s.wts(s.cam, (root.CFrame * s.cf(-r_size.X, -r_size.Y - 1.8, 0)).Position)
     
-    local parts = {root_part, head_part} -- Optimization: Only calculate bounds based on Root+Head (faster) or use GetChildren for precision
-    -- For full rigs, calculating every part is heavy. Let's do a dynamic size estimation based on RootPart size
+    local h = s.abs(tl.Y - bl.Y)
+    local w = h * 0.6 -- Standard R15/R6 Aspect Ratio estimate
     
-    local size = root_part.Size
-    local corners = {
-        Vector3(size.X/2, size.Y/2 + 2, size.Z/2), -- Estimated height padding
-        Vector3(-size.X/2, -size.Y/2 - 1.5, -size.Z/2)
-    }
-    
-    -- Project corners
-    for _, offset in pairs(corners) do
-        local world = root_part.CFrame:PointToWorldSpace(offset)
-        local screen = s.wts(s.cam, world)
-        min_x = math.min(min_x, screen.X)
-        min_y = math.min(min_y, screen.Y)
-        max_x = math.max(max_x, screen.X)
-        max_y = math.max(max_y, screen.Y)
-    end
-    
-    local w = max_x - min_x
-    local h = max_y - min_y
-    local box_size = Vector2(w, h)
-    local box_pos = Vector2(min_x, min_y)
+    local bx = pos.X - (w / 2)
+    local by = pos.Y - (h / 2)
 
-    -- RENDER: Box
+    -- 1. Box
     if cfg.features.box then
-        self.canvas.box.Size = box_size
-        self.canvas.box.Position = box_pos
+        self.canvas.box.Size = s.v2(w, h)
+        self.canvas.box.Position = s.v2(bx, by)
         self.canvas.box.Color = cfg.colors.box
         self.canvas.box.Visible = true
-        
-        self.canvas.box_outline.Size = box_size
-        self.canvas.box_outline.Position = box_pos
-        self.canvas.box_outline.Visible = true
-        
+
+        self.canvas.box_out.Size = s.v2(w, h)
+        self.canvas.box_out.Position = s.v2(bx, by)
+        self.canvas.box_out.Visible = true
+
         if cfg.features.fill then
-            self.canvas.box_fill.Size = box_size
-            self.canvas.box_fill.Position = box_pos
+            self.canvas.box_fill.Size = s.v2(w, h)
+            self.canvas.box_fill.Position = s.v2(bx, by)
             self.canvas.box_fill.Color = cfg.colors.box
             self.canvas.box_fill.Visible = true
-        else self.canvas.box_fill.Visible = false end
+        else
+            self.canvas.box_fill.Visible = false
+        end
     else
         self.canvas.box.Visible = false
-        self.canvas.box_outline.Visible = false
+        self.canvas.box_out.Visible = false
         self.canvas.box_fill.Visible = false
     end
-    
-    -- RENDER: Name
+
+    -- 2. Name
     if cfg.features.name then
-        self.canvas.name.Text = self.model.Name
-        if hum and hum.DisplayName ~= "" then self.canvas.name.Text = hum.DisplayName end
-        self.canvas.name.Position = Vector2(min_x + w/2, min_y - 16)
+        local txt = self.model.Name
+        if hum and hum.DisplayName ~= "" then txt = hum.DisplayName end
+        
+        self.canvas.name.Text = txt
+        self.canvas.name.Position = s.v2(bx + (w / 2), by - 16)
         self.canvas.name.Color = cfg.colors.name
         self.canvas.name.Visible = true
-    else self.canvas.name.Visible = false end
-
-    -- RENDER: Distance
-    if cfg.features.distance then
-        self.canvas.dist.Text = "[" .. math.floor(dist) .. "s]" -- Studs
-        self.canvas.dist.Position = Vector2(min_x + w/2, max_y + 2)
-        self.canvas.dist.Color = cfg.colors.dist
-        self.canvas.dist.Visible = true
-    else self.canvas.dist.Visible = false end
-
-    -- RENDER: Health
-    if cfg.features.health and hum then
-        local hp, max = hum.Health, hum.MaxHealth
-        local pct = math.clamp(hp/max, 0, 1)
-        local bar_h = h * pct
-        
-        self.canvas.bar.Size = Vector2(2, bar_h)
-        self.canvas.bar.Position = Vector2(min_x - 5, max_y - bar_h)
-        self.canvas.bar.Color = Color3.fromHSV(pct * 0.33, 1, 1) -- Dynamic Green->Red
-        self.canvas.bar.Visible = true
-        
-        self.canvas.bar_outline.Size = Vector2(4, h + 2)
-        self.canvas.bar_outline.Position = Vector2(min_x - 6, min_y - 1)
-        self.canvas.bar_outline.Visible = true
     else
-        self.canvas.bar.Visible = false
-        self.canvas.bar_outline.Visible = false
+        self.canvas.name.Visible = false
     end
 
-    -- RENDER: Tracer
+    -- 3. Health
+    if cfg.features.health and hum then
+        local hp = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
+        local bar_h = h * hp
+        
+        self.canvas.bar.Size = s.v2(2, bar_h)
+        self.canvas.bar.Position = s.v2(bx - 5, (by + h) - bar_h)
+        self.canvas.bar.Color = Color3.fromHSV(hp * 0.3, 1, 1) -- Red -> Green
+        self.canvas.bar.Visible = true
+        
+        self.canvas.bar_out.Size = s.v2(4, h + 2)
+        self.canvas.bar_out.Position = s.v2(bx - 6, by - 1)
+        self.canvas.bar_out.Visible = true
+    else
+        self.canvas.bar.Visible = false
+        self.canvas.bar_out.Visible = false
+    end
+
+    -- 4. Distance / Stats
+    if cfg.features.distance then
+        self.canvas.dist.Text = "[" .. s.floor(dist) .. "s]"
+        self.canvas.dist.Position = s.v2(bx + (w / 2), by + h + 2)
+        self.canvas.dist.Color = cfg.colors.dist
+        self.canvas.dist.Visible = true
+    else
+        self.canvas.dist.Visible = false
+    end
+    
+    if cfg.features.velocity then
+        self.canvas.info.Text = s.floor(self.vel) .. " SPS"
+        self.canvas.info.Position = s.v2(bx + w + 4, by)
+        self.canvas.info.Color = cfg.colors.stats
+        self.canvas.info.Visible = true
+    else
+        self.canvas.info.Visible = false
+    end
+
+    -- 5. Tracers
     if cfg.features.tracer then
-        self.canvas.tracer.From = Vector2(s.cam.ViewportSize.X/2, s.cam.ViewportSize.Y)
-        self.canvas.tracer.To = Vector2(min_x + w/2, max_y)
+        self.canvas.tracer.From = s.v2(s.cam.ViewportSize.X / 2, s.cam.ViewportSize.Y)
+        self.canvas.tracer.To = s.v2(bx + (w / 2), by + h)
         self.canvas.tracer.Color = cfg.colors.tracer
         self.canvas.tracer.Visible = true
-    else self.canvas.tracer.Visible = false end
+    else
+        self.canvas.tracer.Visible = false
+    end
 
-    -- RENDER: Chinese Hat (3D)
-    if cfg.features.hat and head_part then
-        local center = head_part.Position + Vector3(0, 1.2, 0)
-        local radius = 1.5
-        local segments = 12
-        local points = {}
+    -- 6. Chinese Hat (3D)
+    if cfg.features.hat and head then
+        local center = head.Position + s.v3(0, 1.3, 0)
+        local top_wts, t_vis = s.wts(s.cam, center + s.v3(0, 0.6, 0))
         
-        -- Calculate points
-        for i=1, segments do
-            local angle = math.rad((i/segments) * 360 + (os.clock() * 50)) -- Spin effect
-            local off = Vector3(math.cos(angle)*radius, -0.5, math.sin(angle)*radius)
-            local p, v = s.wts(s.cam, center + off)
-            if v then table.insert(points, Vector2(p.X, p.Y)) else table.insert(points, nil) end
-        end
-        local top, top_vis = s.wts(s.cam, center + Vector3(0, 0.5, 0))
-
-        if top_vis then
-            for i=1, segments do
-                local p1 = points[i]
-                local p2 = points[(i % segments) + 1]
+        if t_vis then
+            local radius = 1.3
+            local segments = 8
+            local time_offset = os.clock() * 2
+            
+            for i = 1, segments do
+                -- Logic: Draw lines from Top to Base Points, and Base Point to Base Point
+                local ang = s.rad((i / segments) * 360 + (time_offset * 20))
+                local next_ang = s.rad(((i + 1) / segments) * 360 + (time_offset * 20))
                 
-                -- Lazy init lines
-                if not self.canvas.hat[i] then self.canvas.hat[i] = NewDrawing("Line", {Thickness=1}) end
-                if not self.canvas.hat[i+segments] then self.canvas.hat[i+segments] = NewDrawing("Line", {Thickness=1}) end
+                local p1 = center + s.v3(s.cos(ang) * radius, -0.2, s.sin(ang) * radius)
+                local p2 = center + s.v3(s.cos(next_ang) * radius, -0.2, s.sin(next_ang) * radius)
                 
-                local l1 = self.canvas.hat[i] -- Base
-                local l2 = self.canvas.hat[i+segments] -- Spike to top
+                local sc1, v1 = s.wts(s.cam, p1)
+                local sc2, v2 = s.wts(s.cam, p2)
                 
-                if p1 and p2 then
-                    l1.From = p1
-                    l1.To = p2
-                    l1.Color = cfg.colors.hat
-                    l1.Visible = true
+                -- Init lines if missing
+                if not self.canvas.hat[i] then self.canvas.hat[i] = NewDraw("Line", {Thickness = 1}) end
+                if not self.canvas.hat[i+segments] then self.canvas.hat[i+segments] = NewDraw("Line", {Thickness = 1}) end
+                
+                local l_spine = self.canvas.hat[i]
+                local l_base = self.canvas.hat[i+segments]
+                
+                if v1 and v2 then
+                    l_spine.From = s.v2(top_wts.X, top_wts.Y)
+                    l_spine.To = s.v2(sc1.X, sc1.Y)
+                    l_spine.Color = cfg.colors.hat
+                    l_spine.Visible = true
                     
-                    l2.From = p1
-                    l2.To = Vector2(top.X, top.Y)
-                    l2.Color = cfg.colors.hat
-                    l2.Visible = true
+                    l_base.From = s.v2(sc1.X, sc1.Y)
+                    l_base.To = s.v2(sc2.X, sc2.Y)
+                    l_base.Color = cfg.colors.hat
+                    l_base.Visible = true
                 else
-                    l1.Visible = false
-                    l2.Visible = false
+                    l_spine.Visible = false
+                    l_base.Visible = false
                 end
             end
+        else
+            -- Hide if head not vis
+            for _, l in pairs(self.canvas.hat) do l.Visible = false end
         end
     else
         for _, l in pairs(self.canvas.hat) do l.Visible = false end
     end
-    
+
     return true
 end
 
 -- // INTERFACE //
-function sor_lib.Add(model, path_cfg)
+function sor_lib.Add(model, config)
     if sor_lib.registry[model] then sor_lib.registry[model]:Destruct() end
-    sor_lib.registry[model] = Entity.new(model, path_cfg)
+    sor_lib.registry[model] = Entity.new(model, config)
 end
 
 function sor_lib.Remove(model)
@@ -325,19 +371,16 @@ function sor_lib.Remove(model)
     end
 end
 
-function sor_lib.Init(cfg)
-    sor_lib.config = cfg
+function sor_lib.Init(config)
+    sor_lib.config = config
     s.rs.RenderStepped:Connect(function()
         if not sor_lib.config.enabled then return end
-        for model, entity in pairs(sor_lib.registry) do
-            local s, err = pcall(function() 
-                local keep = entity:Update(sor_lib.config) 
+        for model, ent in pairs(sor_lib.registry) do
+            local success, err = pcall(function()
+                local keep = ent:Update(sor_lib.config)
                 if not keep then sor_lib.Remove(model) end
             end)
-            if not s then 
-                -- Fail silently and cleanup to prevent spam
-                sor_lib.Remove(model) 
-            end
+            if not success then sor_lib.Remove(model) end
         end
     end)
 end
