@@ -1,787 +1,412 @@
--- CustomESP Library
+-- sor.lua // visuals_engine_v1
+-- architecture: drawing_api // dynamic_rigging
 
-local CustomESP = {}
-
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local Camera = workspace.CurrentCamera
-local LocalPlayer = Players.LocalPlayer
-
-local ESPs = {}
-
-local defaultOptions = {
-    TeamCheck = false,
-    RootPartName = "HumanoidRootPart",
-    HeadPartName = "Head",
-    HeadOffset = 0.5,
-    LegOffset = 3,
-    WidthRatio = 2,
-    Colors = {
-        Box = Color3.fromRGB(255, 255, 255),
-        Skeleton = Color3.fromRGB(255, 255, 255),
-        Tracer = Color3.fromRGB(255, 255, 255),
-        HeadDot = Color3.fromRGB(255, 255, 255),
-        ViewDirection = Color3.fromRGB(255, 255, 255),
-        Name = Color3.fromRGB(255, 255, 255),
-        DisplayName = Color3.fromRGB(255, 255, 255),
-        Distance = Color3.fromRGB(255, 255, 255),
-        Speed = Color3.fromRGB(255, 255, 255),
-        Tool = Color3.fromRGB(255, 255, 255),
-        ChineseHat = Color3.fromRGB(255, 255, 255),
-        BoundingBox = Color3.fromRGB(255, 255, 255),
-    },
-    Features = {
-        Box = true,
-        BoundingBox = false,
-        Skeleton = true,
-        ChineseHat2D = false,
-        ChineseHat3D = false,
-        BoxImage = false,
-        ToolESP = true,
-        NameESP = true,
-        DisplayNameESP = true,
-        DistanceESP = true,
-        SpeedESP = true,
-        HealthBar = true,
-        Tracer = true,
-        HeadDot = true,
-        OffscreenArrow = true,
-        ViewDirection = true,
-        CornerBox = false,
-        FilledBox = false,
-        Outline = false,
-        Rainbow = false,
-        Fade = false,
-        VisibleCheck = false,
-        WeaponName = true,
-        Ammo = false,
-        StaminaBar = false,
-        JumpPower = false,
-        WalkSpeed = false,
-        Status = false,
-        Kills = false,
-        Deaths = false,
-    },
-    BoneConnections = {
-        {"Head", "UpperTorso"},
-        {"UpperTorso", "LowerTorso"},
-        {"UpperTorso", "RightUpperArm"},
-        {"RightUpperArm", "RightLowerArm"},
-        {"RightLowerArm", "RightHand"},
-        {"UpperTorso", "LeftUpperArm"},
-        {"LeftUpperArm", "LeftLowerArm"},
-        {"LeftLowerArm", "LeftHand"},
-        {"LowerTorso", "RightUpperLeg"},
-        {"RightUpperLeg", "RightLowerLeg"},
-        {"RightLowerLeg", "RightFoot"},
-        {"LowerTorso", "LeftUpperLeg"},
-        {"LeftUpperLeg", "LeftLowerLeg"},
-        {"LeftLowerLeg", "LeftFoot"},
-    },
-    ImageData = nil,  -- Base64 or raw image data for BoxImage if enabled
+local sor_visuals = {
+    _registry = {},
+    _connections = {},
+    _config = {
+        enabled = true,
+        team_check = false,
+        render_dist = 2000,
+        refresh_rate = 0, -- 0 = renderstepped
+        font = 2, -- 0=UI, 1=System, 2=Plex, 3=Monospace
+        text_size = 13,
+        limit_text_width = true
+    }
 }
 
-local function CreateDrawing(type)
-    local d = Drawing.new(type)
-    d.Visible = false
-    return d
+local s = {
+    rs = game:GetService("RunService"),
+    ws = game:GetService("Workspace"),
+    plrs = game:GetService("Players"),
+    cam = game:GetService("Workspace").CurrentCamera,
+    wts = game:GetService("Workspace").CurrentCamera.WorldToViewportPoint
+}
+
+local Drawing = Drawing
+local Vector2 = Vector2.new
+local Vector3 = Vector3.new
+local Color3 = Color3.new
+local floor = math.floor
+local atan2 = math.atan2
+local cos = math.cos
+local sin = math.sin
+local pi = math.pi
+
+-- // drawing object pool
+local function create_draw(type, props)
+    local obj = Drawing.new(type)
+    for k, v in pairs(props) do obj[k] = v end
+    return obj
 end
 
-local function GetExtents(model)
-    local minVec = Vector3.new(math.huge, math.huge, math.huge)
-    local maxVec = Vector3.new(-math.huge, -math.huge, -math.huge)
-    for _, part in ipairs(model:GetDescendants()) do
+-- // class: entity
+local Entity = {}
+Entity.__index = Entity
+
+function Entity.new(model, config)
+    local self = setmetatable({}, Entity)
+    self.model = model
+    self.config = config or {}
+    
+    -- overrides for custom models
+    self.root_name = config.root_name or "HumanoidRootPart"
+    self.head_name = config.head_name or "Head"
+    self.hum_name = config.hum_name or "Humanoid"
+    
+    -- state
+    self.drawings = {
+        box = create_draw("Square", {Thickness = 1, Filled = false, ZIndex = 2}),
+        box_fill = create_draw("Square", {Thickness = 1, Filled = true, Transparency = 0.2, ZIndex = 1}),
+        box_outline = create_draw("Square", {Thickness = 3, Filled = false, ZIndex = 1, Color = Color3(0,0,0)}),
+        
+        name = create_draw("Text", {Center = true, Outline = true, ZIndex = 3}),
+        dist = create_draw("Text", {Center = true, Outline = true, ZIndex = 3}),
+        tool = create_draw("Text", {Center = true, Outline = true, ZIndex = 3}),
+        stats = create_draw("Text", {Center = false, Outline = true, ZIndex = 3}), -- Velocity/Health text
+        
+        health_bar = create_draw("Square", {Thickness = 1, Filled = true, ZIndex = 2}),
+        health_outline = create_draw("Square", {Thickness = 1, Filled = true, ZIndex = 1, Color = Color3(0,0,0)}),
+        
+        tracer = create_draw("Line", {Thickness = 1, ZIndex = 1}),
+        gaze = create_draw("Line", {Thickness = 1, ZIndex = 2}),
+        
+        skel_main = {}, -- table of lines
+        hat_lines = {}, -- table of lines (3d) or single triangle (2d)
+        
+        arrow = create_draw("Triangle", {Thickness = 1, Filled = true, ZIndex = 4})
+    }
+    
+    self.last_pos = Vector3(0,0,0)
+    self.velocity_mag = 0
+    self.last_update = os.clock()
+    
+    return self
+end
+
+function Entity:destruct()
+    for _, v in pairs(self.drawings) do
+        if type(v) == "table" and not v.Remove then
+            for _, line in pairs(v) do line:Remove() end
+        else
+            v:Remove()
+        end
+    end
+    self.drawings = nil
+end
+
+function Entity:get_part(name)
+    return self.model:FindFirstChild(name)
+end
+
+function Entity:get_health()
+    local hum = self.model:FindFirstChild(self.hum_name)
+    if hum then return hum.Health, hum.MaxHealth end
+    return 100, 100 -- fallback
+end
+
+function Entity:is_alive()
+    local h, max = self:get_health()
+    return h > 0 and self.model.Parent ~= nil
+end
+
+-- // math: 3d bounding box calc
+function Entity:get_bounds(root, parts)
+    local min_x, min_y, max_x, max_y = 9e9, 9e9, -9e9, -9e9
+    
+    for _, part in pairs(parts) do
         if part:IsA("BasePart") then
-            local halfSize = part.Size / 2
+            local size = part.Size
             local cf = part.CFrame
-            for x = -1, 1, 2 do
-                for y = -1, 1, 2 do
-                    for z = -1, 1, 2 do
-                        local corner = cf * Vector3.new(x * halfSize.X, y * halfSize.Y, z * halfSize.Z)
-                        minVec = minVec:Min(corner)
-                        maxVec = maxVec:Max(corner)
-                    end
+            
+            local corners = {
+                cf * Vector3(size.X/2, size.Y/2, size.Z/2),
+                cf * Vector3(-size.X/2, size.Y/2, size.Z/2),
+                cf * Vector3(size.X/2, -size.Y/2, size.Z/2),
+                cf * Vector3(-size.X/2, -size.Y/2, size.Z/2),
+                cf * Vector3(size.X/2, size.Y/2, -size.Z/2),
+                cf * Vector3(-size.X/2, size.Y/2, -size.Z/2),
+                cf * Vector3(size.X/2, -size.Y/2, -size.Z/2),
+                cf * Vector3(-size.X/2, -size.Y/2, -size.Z/2),
+            }
+            
+            for _, corner in pairs(corners) do
+                local pos, vis = s.wts(s.cam, corner)
+                if vis then
+                    if pos.X < min_x then min_x = pos.X end
+                    if pos.Y < min_y then min_y = pos.Y end
+                    if pos.X > max_x then max_x = pos.X end
+                    if pos.Y > max_y then max_y = pos.Y end
                 end
             end
         end
     end
-    return minVec, maxVec
+    
+    return min_x, min_y, max_x, max_y
 end
 
-function CustomESP.Add(target, userOptions)
-    local options = {}
-    for k, v in pairs(defaultOptions) do options[k] = v end
-    for k, v in pairs(userOptions or {}) do options[k] = v end
-
-    local esp = {
-        Target = target,
-        Options = options,
-        Drawings = {},
-        BoneParts = {},
-        Enabled = true,
-        PrevPos = nil,
-        PrevTime = tick(),
-    }
-
-    local root = target:FindFirstChild(options.RootPartName)
-    local head = target:FindFirstChild(options.HeadPartName)
-    if not root or not head then return nil end
-
-    esp.Root = root
-    esp.Head = head
-    esp.PrevPos = root.Position
-
-    for _, conn in ipairs(options.BoneConnections) do
-        local p1 = target:FindFirstChild(conn[1])
-        local p2 = target:FindFirstChild(conn[2])
-        if p1 and p2 then
-            table.insert(esp.BoneParts, {p1, p2})
-        end
+function Entity:update(settings)
+    if not self.model or not self.model.Parent then 
+        self:destruct()
+        return false 
     end
 
-    if options.Features.Box or options.Features.FilledBox or options.Features.Outline then
-        -- Normal box (outline only now)
-        if options.Features.Box then
-            esp.Drawings.Box = CreateDrawing("Square")
-            esp.Drawings.Box.Filled = false
-        end
-
-        -- Filled background
-        if options.Features.FilledBox then
-            esp.Drawings.FilledBox = CreateDrawing("Square")
-            esp.Drawings.FilledBox.Filled = true
-            esp.Drawings.FilledBox.Transparency = 0.15
-        end
-
-        -- Black outline using slightly larger square
-        if options.Features.Outline then
-            esp.Drawings.Outline = CreateDrawing("Square")
-            esp.Drawings.Outline.Filled = false
-            esp.Drawings.Outline.Color = Color3.new(0, 0, 0)
-        end
-    end
-
-    if options.Features.CornerBox then
-        esp.Drawings.CornerLines = {}
-        for i = 1, 8 do
-            local line = CreateDrawing("Line")
-            line.Thickness = 2
-            table.insert(esp.Drawings.CornerLines, line)
-        end
-    end
-
-    if options.Features.Skeleton then
-        esp.Drawings.SkeletonLines = {}
-        for i = 1, #esp.BoneParts do
-            esp.Drawings.SkeletonLines[i] = CreateDrawing("Line")
-            esp.Drawings.SkeletonLines[i].Thickness = 1
-        end
-    end
-
-    if options.Features.Tracer then
-        esp.Drawings.Tracer = CreateDrawing("Line")
-        esp.Drawings.Tracer.Thickness = 1
-    end
-
-    if options.Features.HeadDot then
-        esp.Drawings.HeadDot = CreateDrawing("Circle")
-        esp.Drawings.HeadDot.Radius = 3
-        esp.Drawings.HeadDot.Filled = true
-        esp.Drawings.HeadDot.NumSides = 32
-    end
-
-    if options.Features.ViewDirection then
-        esp.Drawings.ViewLine = CreateDrawing("Line")
-        esp.Drawings.ViewLine.Thickness = 1
-    end
-
-    if options.Features.NameESP then
-        esp.Drawings.NameText = CreateDrawing("Text")
-        esp.Drawings.NameText.Size = 13
-        esp.Drawings.NameText.Center = true
-        esp.Drawings.NameText.Outline = true
-    end
-
-    if options.Features.DisplayNameESP then
-        esp.Drawings.DisplayText = CreateDrawing("Text")
-        esp.Drawings.DisplayText.Size = 13
-        esp.Drawings.DisplayText.Center = true
-        esp.Drawings.DisplayText.Outline = true
-    end
-
-    if options.Features.DistanceESP then
-        esp.Drawings.DistanceText = CreateDrawing("Text")
-        esp.Drawings.DistanceText.Size = 13
-        esp.Drawings.DistanceText.Center = true
-        esp.Drawings.DistanceText.Outline = true
-    end
-
-    if options.Features.SpeedESP then
-        esp.Drawings.SpeedText = CreateDrawing("Text")
-        esp.Drawings.SpeedText.Size = 13
-        esp.Drawings.SpeedText.Center = true
-        esp.Drawings.SpeedText.Outline = true
-    end
-
-    if options.Features.HealthBar then
-        esp.Drawings.HealthBack = CreateDrawing("Square")
-        esp.Drawings.HealthBack.Filled = true
-        esp.Drawings.HealthBack.Color = Color3.fromRGB(255, 0, 0)
-        esp.Drawings.HealthFront = CreateDrawing("Square")
-        esp.Drawings.HealthFront.Filled = true
-        esp.Drawings.HealthFront.Color = Color3.fromRGB(0, 255, 0)
-    end
-
-    if options.Features.ToolESP then
-        esp.Drawings.ToolText = CreateDrawing("Text")
-        esp.Drawings.ToolText.Size = 13
-        esp.Drawings.ToolText.Center = true
-        esp.Drawings.ToolText.Outline = true
-    end
-
-    if options.Features.OffscreenArrow then
-        esp.Drawings.Arrow = CreateDrawing("Triangle")
-        esp.Drawings.Arrow.Filled = true
-        esp.Drawings.Arrow.Transparency = 1
-    end
-
-    if options.Features.ChineseHat2D then
-        esp.Drawings.Hat2D = CreateDrawing("Triangle")
-        esp.Drawings.Hat2D.Filled = false
-        esp.Drawings.Hat2D.Thickness = 1
-    end
-
-    if options.Features.ChineseHat3D then
-        esp.Drawings.Hat3DLines = {}
-        for i = 1, 8 do
-            esp.Drawings.Hat3DLines[i] = CreateDrawing("Line")
-            esp.Drawings.Hat3DLines[i].Thickness = 1
-        end
-    end
-
-    if options.Features.BoundingBox then
-        esp.Drawings.BBoxLines = {}
-        for i = 1, 12 do
-            esp.Drawings.BBoxLines[i] = CreateDrawing("Line")
-            esp.Drawings.BBoxLines[i].Thickness = 1
-        end
-    end
-
-    if options.Features.BoxImage and options.ImageData then
-        esp.Drawings.BoxImage = Drawing.new("Image")
-        esp.Drawings.BoxImage.Data = options.ImageData
-    end
-
-    if options.Features.Ammo then
-        esp.Drawings.AmmoText = CreateDrawing("Text")
-        esp.Drawings.AmmoText.Size = 13
-        esp.Drawings.AmmoText.Center = true
-        esp.Drawings.AmmoText.Outline = true
-    end
-
-    if options.Features.StaminaBar then
-        esp.Drawings.StaminaBack = CreateDrawing("Square")
-        esp.Drawings.StaminaBack.Filled = true
-        esp.Drawings.StaminaBack.Color = Color3.fromRGB(255, 0, 0)
-        esp.Drawings.StaminaFront = CreateDrawing("Square")
-        esp.Drawings.StaminaFront.Filled = true
-        esp.Drawings.StaminaFront.Color = Color3.fromRGB(0, 0, 255)
-    end
-
-    if options.Features.JumpPower then
-        esp.Drawings.JumpPowerText = CreateDrawing("Text")
-        esp.Drawings.JumpPowerText.Size = 13
-        esp.Drawings.JumpPowerText.Center = true
-        esp.Drawings.JumpPowerText.Outline = true
-    end
-
-    if options.Features.WalkSpeed then
-        esp.Drawings.WalkSpeedText = CreateDrawing("Text")
-        esp.Drawings.WalkSpeedText.Size = 13
-        esp.Drawings.WalkSpeedText.Center = true
-        esp.Drawings.WalkSpeedText.Outline = true
-    end
-
-    if options.Features.Status then
-        esp.Drawings.StatusText = CreateDrawing("Text")
-        esp.Drawings.StatusText.Size = 13
-        esp.Drawings.StatusText.Center = true
-        esp.Drawings.StatusText.Outline = true
-    end
-
-    if options.Features.Kills then
-        esp.Drawings.KillsText = CreateDrawing("Text")
-        esp.Drawings.KillsText.Size = 13
-        esp.Drawings.KillsText.Center = true
-        esp.Drawings.KillsText.Outline = true
-    end
-
-    if options.Features.Deaths then
-        esp.Drawings.DeathsText = CreateDrawing("Text")
-        esp.Drawings.DeathsText.Size = 13
-        esp.Drawings.DeathsText.Center = true
-        esp.Drawings.DeathsText.Outline = true
-    end
-
-    table.insert(ESPs, esp)
-    return esp
-end
-
-local function HideDrawings(esp)
-    for _, d in pairs(esp.Drawings) do
-        if type(d) == "table" then
-            for _, dd in ipairs(d) do
-                dd.Visible = false
-            end
-        else
-            d.Visible = false
-        end
-    end
-end
-
-function CustomESP:Destroy(esp)
-    HideDrawings(esp)
-    for _, d in pairs(esp.Drawings) do
-        if type(d) == "table" then
-            for _, dd in ipairs(d) do
-                dd:Remove()
-            end
-        else
-            d:Remove()
-        end
-    end
-    esp.Drawings = {}
-    esp.Enabled = false
-end
-
-local function UpdateESP(esp)
-    if not esp.Enabled or not esp.Root.Parent or not esp.Head.Parent then
-        HideDrawings(esp)
-        return
-    end
-
-    local player = Players:GetPlayerFromCharacter(esp.Target)
-    if esp.Options.TeamCheck and player and player.Team == LocalPlayer.Team then
-        HideDrawings(esp)
-        return
-    end
-
-    local rootPos = esp.Root.Position
-    local screenRoot, onscreen = Camera:WorldToViewportPoint(rootPos)
-    local screenRoot2D = Vector2.new(screenRoot.X, screenRoot.Y)
-
-    local headPos = esp.Head.Position + Vector3.new(0, esp.Options.HeadOffset, 0)
-    local headScreen = Camera:WorldToViewportPoint(headPos)
-    local headScreen2D = Vector2.new(headScreen.X, headScreen.Y)
-
-    local legPos = rootPos - Vector3.new(0, esp.Options.LegOffset, 0)
-    local legScreen = Camera:WorldToViewportPoint(legPos)
-    local legScreen2D = Vector2.new(legScreen.X, legScreen.Y)
-
-    local boxHeight = math.abs(headScreen2D.Y - legScreen2D.Y)
-    local boxWidth = boxHeight / esp.Options.WidthRatio
-    local boxPos = Vector2.new(screenRoot2D.X - boxWidth / 2, math.min(headScreen2D.Y, legScreen2D.Y))
-    local boxSize = Vector2.new(boxWidth, boxHeight)
-
-    local distance = 0
-    local localRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if localRoot then
-        distance = (localRoot.Position - rootPos).Magnitude
-    end
-
-    local transparency = 1
-    if esp.Options.Features.Fade then
-        transparency = math.clamp(1 - (distance / 1000), 0.2, 1)
-    end
-
-    local isVisible = true
-    if esp.Options.Features.VisibleCheck then
-        local rayParams = RaycastParams.new()
-        rayParams.FilterDescendantsInstances = {LocalPlayer.Character or LocalPlayer, Camera}
-        rayParams.FilterType = Enum.RaycastFilterType.Exclude
-        local rayResult = workspace:Raycast(Camera.CFrame.Position, rootPos - Camera.CFrame.Position, rayParams)
-        isVisible = rayResult and rayResult.Instance:IsDescendantOf(esp.Target)
-    end
-
-    if esp.Options.Features.VisibleCheck and not isVisible then
-        HideDrawings(esp)
-        return
-    end
-
-    local baseColor = esp.Options.Colors.Box
-    if esp.Options.Features.Rainbow then
-        local hue = tick() % 5 / 5
-        baseColor = Color3.fromHSV(hue, 1, 1)
-    end
-
-    if esp.Options.Features.OffscreenArrow and not onscreen then
-        local camPos = Camera.CFrame.Position
-        local dir = (rootPos - camPos).Unit
-        local screenDir = Vector2.new(-dir.Z, dir.X) -- rotated 90 degrees for direction
-        local radius = math.min(Camera.ViewportSize.X, Camera.ViewportSize.Y) / 2 - 50
-        local edgePos = Camera.ViewportSize / 2 + screenDir * radius
-
-        local rot = math.atan2(screenDir.Y, screenDir.X)
-        local arrowSize = 10
-        esp.Drawings.Arrow.PointA = edgePos
-        esp.Drawings.Arrow.PointB = edgePos + Vector2.new(math.cos(rot + 2 * math.pi / 3) * arrowSize, math.sin(rot + 2 * math.pi / 3) * arrowSize)
-        esp.Drawings.Arrow.PointC = edgePos + Vector2.new(math.cos(rot - 2 * math.pi / 3) * arrowSize, math.sin(rot - 2 * math.pi / 3) * arrowSize)
-        esp.Drawings.Arrow.Color = baseColor
-        esp.Drawings.Arrow.Transparency = transparency
-        esp.Drawings.Arrow.Visible = true
-
-        HideDrawings(esp) -- hide others
-        return
-    elseif esp.Options.Features.OffscreenArrow then
-        esp.Drawings.Arrow.Visible = false
-    end
-
-    if not onscreen then
-        HideDrawings(esp)
-        return
-    end
-
-    if esp.Drawings.Box or esp.Drawings.FilledBox or esp.Drawings.Outline then
-        local offset = esp.Drawings.Outline and 2 or 0
-        local outlinePos = boxPos - Vector2.new(offset, offset)
-        local outlineSize = boxSize + Vector2.new(offset * 2, offset * 2)
-
-        if esp.Drawings.Outline then
-            esp.Drawings.Outline.Position = outlinePos
-            esp.Drawings.Outline.Size = outlineSize
-            esp.Drawings.Outline.Transparency = transparency
-            esp.Drawings.Outline.Visible = true
-        end
-
-        if esp.Drawings.FilledBox then
-            esp.Drawings.FilledBox.Position = boxPos
-            esp.Drawings.FilledBox.Size = boxSize
-            esp.Drawings.FilledBox.Color = esp.Options.Colors.Box
-            esp.Drawings.FilledBox.Transparency = transparency * 0.15
-            esp.Drawings.FilledBox.Visible = true
-        end
-
-        if esp.Drawings.Box then
-            esp.Drawings.Box.Position = boxPos
-            esp.Drawings.Box.Size = boxSize
-            esp.Drawings.Box.Color = esp.Options.Colors.Box or baseColor
-            esp.Drawings.Box.Transparency = transparency
-            esp.Drawings.Box.Visible = true
-        end
-    end
-
-    if esp.Drawings.CornerLines then
-        local cornerLengthH = boxWidth / 3
-        local cornerLengthV = boxHeight / 3
-        local lines = esp.Drawings.CornerLines
-        -- Top left
-        lines[1].From = boxPos
-        lines[1].To = boxPos + Vector2.new(cornerLengthH, 0)
-        lines[2].From = boxPos
-        lines[2].To = boxPos + Vector2.new(0, cornerLengthV)
-        -- Top right
-        lines[3].From = boxPos + Vector2.new(boxWidth, 0)
-        lines[3].To = boxPos + Vector2.new(boxWidth - cornerLengthH, 0)
-        lines[4].From = boxPos + Vector2.new(boxWidth, 0)
-        lines[4].To = boxPos + Vector2.new(boxWidth, cornerLengthV)
-        -- Bottom left
-        lines[5].From = boxPos + Vector2.new(0, boxHeight)
-        lines[5].To = boxPos + Vector2.new(cornerLengthH, boxHeight)
-        lines[6].From = boxPos + Vector2.new(0, boxHeight)
-        lines[6].To = boxPos + Vector2.new(0, boxHeight - cornerLengthV)
-        -- Bottom right
-        lines[7].From = boxPos + Vector2.new(boxWidth, boxHeight)
-        lines[7].To = boxPos + Vector2.new(boxWidth - cornerLengthH, boxHeight)
-        lines[8].From = boxPos + Vector2.new(boxWidth, boxHeight)
-        lines[8].To = boxPos + Vector2.new(boxWidth, boxHeight - cornerLengthV)
-        for _, line in ipairs(lines) do
-            line.Color = esp.Options.Colors.Box or baseColor
-            line.Transparency = transparency
-            line.Visible = true
-        end
-    end
-
-    if esp.Drawings.SkeletonLines then
-        for i, bone in ipairs(esp.BoneParts) do
-            local p1, v1 = Camera:WorldToViewportPoint(bone[1].Position)
-            local p2, v2 = Camera:WorldToViewportPoint(bone[2].Position)
-            if v1 and v2 then
-                esp.Drawings.SkeletonLines[i].From = Vector2.new(p1.X, p1.Y)
-                esp.Drawings.SkeletonLines[i].To = Vector2.new(p2.X, p2.Y)
-                esp.Drawings.SkeletonLines[i].Color = esp.Options.Colors.Skeleton or baseColor
-                esp.Drawings.SkeletonLines[i].Transparency = transparency
-                esp.Drawings.SkeletonLines[i].Visible = true
+    local root = self:get_part(self.root_name)
+    local head = self:get_part(self.head_name)
+    local hum = self.model:FindFirstChild(self.hum_name)
+    
+    -- visibility reset
+    local function set_vis(state)
+        for _, v in pairs(self.drawings) do
+            if type(v) == "table" and not v.Remove then
+                for _, l in pairs(v) do l.Visible = state end
             else
-                esp.Drawings.SkeletonLines[i].Visible = false
+                v.Visible = state
             end
         end
     end
-
-    if esp.Drawings.Tracer then
-        local from = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-        local to = boxPos + Vector2.new(boxWidth / 2, boxHeight)
-        esp.Drawings.Tracer.From = from
-        esp.Drawings.Tracer.To = to
-        esp.Drawings.Tracer.Color = esp.Options.Colors.Tracer or baseColor
-        esp.Drawings.Tracer.Transparency = transparency
-        esp.Drawings.Tracer.Visible = true
+    
+    if not root or not self:is_alive() then 
+        set_vis(false)
+        return true 
     end
 
-    if esp.Drawings.HeadDot then
-        esp.Drawings.HeadDot.Position = headScreen2D
-        esp.Drawings.HeadDot.Color = esp.Options.Colors.HeadDot or baseColor
-        esp.Drawings.HeadDot.Transparency = transparency
-        esp.Drawings.HeadDot.Visible = true
+    -- logic: velocity
+    local curr_time = os.clock()
+    local delta = curr_time - self.last_update
+    if delta > 0.1 then
+        self.velocity_mag = (root.Position - self.last_pos).Magnitude / delta
+        self.last_pos = root.Position
+        self.last_update = curr_time
     end
 
-    if esp.Drawings.ViewLine then
-        local startPos = rootPos
-        local endPos = startPos + esp.Root.CFrame.LookVector * 5
-        local startScreen, sv = Camera:WorldToViewportPoint(startPos)
-        local endScreen, ev = Camera:WorldToViewportPoint(endPos)
-        if sv and ev then
-            esp.Drawings.ViewLine.From = Vector2.new(startScreen.X, startScreen.Y)
-            esp.Drawings.ViewLine.To = Vector2.new(endScreen.X, endScreen.Y)
-            esp.Drawings.ViewLine.Color = esp.Options.Colors.ViewDirection or baseColor
-            esp.Drawings.ViewLine.Transparency = transparency
-            esp.Drawings.ViewLine.Visible = true
+    -- logic: screen projection
+    local root_pos, root_vis = s.wts(s.cam, root.Position)
+    local head_pos = head and s.wts(s.cam, head.Position) or root_pos
+    local dist = (s.cam.CFrame.Position - root.Position).Magnitude
+    
+    -- check: distance & team
+    if dist > settings.render_dist then set_vis(false); return true end
+    
+    -- check: team
+    if settings.team_check then
+        local plr = s.plrs:GetPlayerFromCharacter(self.model)
+        if plr and plr.Team == s.plrs.LocalPlayer.Team then
+            set_vis(false); return true
+        end
+    end
+
+    -- render: offscreen arrow
+    if settings.features.offscreen_arrows and not root_vis then
+        local relative = s.cam.CFrame:PointToObjectSpace(root.Position)
+        local angle = atan2(relative.Y, relative.X) + pi/2
+        
+        -- arrow logic
+        local center = Vector2(s.cam.ViewportSize.X/2, s.cam.ViewportSize.Y/2)
+        local radius = 300
+        local arrow_pos = center + Vector2(cos(angle)*radius, sin(angle)*radius)
+        
+        self.drawings.arrow.PointA = arrow_pos + Vector2(cos(angle)*20, sin(angle)*20)
+        self.drawings.arrow.PointB = arrow_pos + Vector2(cos(angle - 0.5)*10, sin(angle - 0.5)*10)
+        self.drawings.arrow.PointC = arrow_pos + Vector2(cos(angle + 0.5)*10, sin(angle + 0.5)*10)
+        self.drawings.arrow.Color = settings.colors.arrow
+        self.drawings.arrow.Visible = true
+        
+        -- hide others
+        for k,v in pairs(self.drawings) do if k ~= "arrow" then if type(v)=="table" then for _,l in pairs(v) do l.Visible=false end else v.Visible=false end end end
+        return true
+    else
+        self.drawings.arrow.Visible = false
+    end
+
+    if not root_vis then set_vis(false); return true end
+
+    -- logic: bounding box
+    local min_x, min_y, max_x, max_y = self:get_bounds(root, self.model:GetChildren())
+    local height = max_y - min_y
+    local width = max_x - min_x
+
+    -- render: box
+    if settings.features.box then
+        local box = self.drawings.box
+        local outline = self.drawings.box_outline
+        
+        box.Size = Vector2(width, height)
+        box.Position = Vector2(min_x, min_y)
+        box.Color = settings.colors.box
+        box.Visible = true
+        
+        outline.Size = Vector2(width, height)
+        outline.Position = Vector2(min_x, min_y)
+        outline.Visible = true
+        
+        if settings.features.box_fill then
+            local fill = self.drawings.box_fill
+            fill.Size = Vector2(width, height)
+            fill.Position = Vector2(min_x, min_y)
+            fill.Color = settings.colors.box
+            fill.Visible = true
+        end
+    else
+        self.drawings.box.Visible = false
+        self.drawings.box_outline.Visible = false
+        self.drawings.box_fill.Visible = false
+    end
+
+    -- render: health
+    if settings.features.health_bar then
+        local hp, max = self:get_health()
+        local pct = math.clamp(hp/max, 0, 1)
+        local bar_h = height * pct
+        
+        local bar = self.drawings.health_bar
+        local out = self.drawings.health_outline
+        
+        bar.Position = Vector2(min_x - 6, max_y - bar_h)
+        bar.Size = Vector2(3, bar_h)
+        bar.Color = Color3(1-pct, pct, 0) -- red to green lerp
+        bar.Visible = true
+        
+        out.Position = Vector2(min_x - 7, min_y - 1)
+        out.Size = Vector2(5, height + 2)
+        out.Visible = true
+        
+        if settings.features.health_text then
+            local txt = self.drawings.stats
+            txt.Text = floor(hp) .. " HP"
+            txt.Position = Vector2(min_x - 30, min_y)
+            txt.Color = bar.Color
+            txt.Size = settings.text_size
+            txt.Font = settings.font
+            txt.Visible = true
+        end
+    else
+        self.drawings.health_bar.Visible = false
+        self.drawings.health_outline.Visible = false
+        self.drawings.stats.Visible = false
+    end
+
+    -- render: name & info
+    if settings.features.name then
+        local n = self.drawings.name
+        n.Text = self.model.Name
+        if self.model:FindFirstChild("Humanoid") and self.model.Humanoid.DisplayName ~= "" then
+            n.Text = self.model.Humanoid.DisplayName
+        end
+        n.Position = Vector2(min_x + width/2, min_y - 18)
+        n.Color = settings.colors.name
+        n.Size = settings.text_size
+        n.Font = settings.font
+        n.Visible = true
+    end
+
+    if settings.features.distance then
+        local d = self.drawings.dist
+        d.Text = "[" .. floor(dist) .. "m]"
+        d.Position = Vector2(min_x + width/2, max_y + 4)
+        d.Color = settings.colors.distance
+        d.Size = settings.text_size - 1
+        d.Font = settings.font
+        d.Visible = true
+    end
+    
+    if settings.features.velocity then
+        local v_txt = self.drawings.tool -- reusing tool slot for secondary info if needed, or add logic
+        -- extending stats text instead
+        local old = self.drawings.stats.Text
+        if settings.features.health_text then
+            self.drawings.stats.Text = old .. "\n" .. floor(self.velocity_mag) .. " SPS"
         else
-            esp.Drawings.ViewLine.Visible = false
+            self.drawings.stats.Text = floor(self.velocity_mag) .. " SPS"
+            self.drawings.stats.Position = Vector2(min_x - 40, min_y)
+            self.drawings.stats.Visible = true
+            self.drawings.stats.Color = settings.colors.stats
         end
     end
 
-    local textY = boxPos.Y - 15
-    local textStep = 13
-
-    if esp.Drawings.NameText then
-        local name = player and player.Name or esp.Target.Name
-        esp.Drawings.NameText.Text = name
-        esp.Drawings.NameText.Position = Vector2.new(boxPos.X + boxWidth / 2, textY)
-        esp.Drawings.NameText.Color = esp.Options.Colors.Name or baseColor
-        esp.Drawings.NameText.Transparency = transparency
-        esp.Drawings.NameText.Visible = true
-        textY = textY - textStep
+    -- render: tracer
+    if settings.features.tracers then
+        local t = self.drawings.tracer
+        local origin = Vector2(s.cam.ViewportSize.X/2, s.cam.ViewportSize.Y) -- Bottom center
+        if settings.features.tracer_origin == "Mouse" then origin = s.uis:GetMouseLocation() end
+        if settings.features.tracer_origin == "Center" then origin = Vector2(s.cam.ViewportSize.X/2, s.cam.ViewportSize.Y/2) end
+        
+        t.From = origin
+        t.To = Vector2(min_x + width/2, max_y)
+        t.Color = settings.colors.tracer
+        t.Visible = true
+    else
+        self.drawings.tracer.Visible = false
     end
 
-    if esp.Drawings.DisplayText then
-        local display = player and player.DisplayName or esp.Target.Name
-        esp.Drawings.DisplayText.Text = display
-        esp.Drawings.DisplayText.Position = Vector2.new(boxPos.X + boxWidth / 2, textY)
-        esp.Drawings.DisplayText.Color = esp.Options.Colors.DisplayName or baseColor
-        esp.Drawings.DisplayText.Transparency = transparency
-        esp.Drawings.DisplayText.Visible = true
-        textY = textY - textStep
-    end
-
-    local bottomY = boxPos.Y + boxHeight + 5
-    local bottomStep = 13
-
-    if esp.Drawings.DistanceText then
-        esp.Drawings.DistanceText.Text = math.floor(distance) .. " studs"
-        esp.Drawings.DistanceText.Position = Vector2.new(boxPos.X + boxWidth / 2, bottomY)
-        esp.Drawings.DistanceText.Color = esp.Options.Colors.Distance or baseColor
-        esp.Drawings.DistanceText.Transparency = transparency
-        esp.Drawings.DistanceText.Visible = true
-        bottomY = bottomY + bottomStep
-    end
-
-    local currentTime = tick()
-    local delta = currentTime - esp.PrevTime
-    local speed = (rootPos - esp.PrevPos).Magnitude / delta
-    esp.PrevPos = rootPos
-    esp.PrevTime = currentTime
-
-    if esp.Drawings.SpeedText then
-        esp.Drawings.SpeedText.Text = math.floor(speed) .. " sps"
-        esp.Drawings.SpeedText.Position = Vector2.new(boxPos.X + boxWidth / 2, bottomY)
-        esp.Drawings.SpeedText.Color = esp.Options.Colors.Speed or baseColor
-        esp.Drawings.SpeedText.Transparency = transparency
-        esp.Drawings.SpeedText.Visible = true
-        bottomY = bottomY + bottomStep
-    end
-
-    local humanoid = esp.Target:FindFirstChildOfClass("Humanoid")
-
-    if humanoid and esp.Drawings.HealthBack and esp.Drawings.HealthFront then
-        local healthRatio = humanoid.Health / humanoid.MaxHealth
-        local barHeight = boxHeight * healthRatio
-        esp.Drawings.HealthBack.Position = boxPos - Vector2.new(5, 0)
-        esp.Drawings.HealthBack.Size = Vector2.new(3, boxHeight)
-        esp.Drawings.HealthBack.Transparency = transparency
-        esp.Drawings.HealthBack.Visible = true
-        esp.Drawings.HealthFront.Position = boxPos - Vector2.new(5, boxHeight - barHeight)
-        esp.Drawings.HealthFront.Size = Vector2.new(3, barHeight)
-        esp.Drawings.HealthFront.Transparency = transparency
-        esp.Drawings.HealthFront.Visible = true
-    end
-
-    local tool = esp.Target:FindFirstChildOfClass("Tool")
-
-    if tool and esp.Drawings.ToolText then
-        esp.Drawings.ToolText.Text = tool.Name
-        esp.Drawings.ToolText.Position = Vector2.new(boxPos.X + boxWidth / 2, bottomY)
-        esp.Drawings.ToolText.Color = esp.Options.Colors.Tool or baseColor
-        esp.Drawings.ToolText.Transparency = transparency
-        esp.Drawings.ToolText.Visible = true
-        bottomY = bottomY + bottomStep
-    end
-
-    if tool and esp.Drawings.AmmoText and tool:FindFirstChild("Ammo") then
-        esp.Drawings.AmmoText.Text = "Ammo: " .. tostring(tool.Ammo.Value)
-        esp.Drawings.AmmoText.Position = Vector2.new(boxPos.X + boxWidth / 2, bottomY)
-        esp.Drawings.AmmoText.Color = baseColor
-        esp.Drawings.AmmoText.Transparency = transparency
-        esp.Drawings.AmmoText.Visible = true
-        bottomY = bottomY + bottomStep
-    end
-
-    if humanoid and esp.Drawings.StaminaBack and esp.Drawings.StaminaFront and humanoid:GetAttribute("Stamina") and humanoid:GetAttribute("MaxStamina") then
-        local staminaRatio = humanoid:GetAttribute("Stamina") / humanoid:GetAttribute("MaxStamina")
-        local barHeight = boxHeight * staminaRatio
-        esp.Drawings.StaminaBack.Position = boxPos + Vector2.new(boxWidth + 2, 0)
-        esp.Drawings.StaminaBack.Size = Vector2.new(3, boxHeight)
-        esp.Drawings.StaminaBack.Transparency = transparency
-        esp.Drawings.StaminaBack.Visible = true
-        esp.Drawings.StaminaFront.Position = boxPos + Vector2.new(boxWidth + 2, boxHeight - barHeight)
-        esp.Drawings.StaminaFront.Size = Vector2.new(3, barHeight)
-        esp.Drawings.StaminaFront.Transparency = transparency
-        esp.Drawings.StaminaFront.Visible = true
-    end
-
-    if humanoid and esp.Drawings.JumpPowerText then
-        esp.Drawings.JumpPowerText.Text = "Jump: " .. math.floor(humanoid.JumpPower)
-        esp.Drawings.JumpPowerText.Position = Vector2.new(boxPos.X + boxWidth / 2, bottomY)
-        esp.Drawings.JumpPowerText.Color = baseColor
-        esp.Drawings.JumpPowerText.Transparency = transparency
-        esp.Drawings.JumpPowerText.Visible = true
-        bottomY = bottomY + bottomStep
-    end
-
-    if humanoid and esp.Drawings.WalkSpeedText then
-        esp.Drawings.WalkSpeedText.Text = "Walk: " .. math.floor(humanoid.WalkSpeed)
-        esp.Drawings.WalkSpeedText.Position = Vector2.new(boxPos.X + boxWidth / 2, bottomY)
-        esp.Drawings.WalkSpeedText.Color = baseColor
-        esp.Drawings.WalkSpeedText.Transparency = transparency
-        esp.Drawings.WalkSpeedText.Visible = true
-        bottomY = bottomY + bottomStep
-    end
-
-    if humanoid and esp.Drawings.StatusText then
-        local status = humanoid:GetState().Name
-        esp.Drawings.StatusText.Text = status
-        esp.Drawings.StatusText.Position = Vector2.new(boxPos.X + boxWidth / 2, bottomY)
-        esp.Drawings.StatusText.Color = baseColor
-        esp.Drawings.StatusText.Transparency = transparency
-        esp.Drawings.StatusText.Visible = true
-        bottomY = bottomY + bottomStep
-    end
-
-    if player and esp.Drawings.KillsText and player:FindFirstChild("leaderstats") and player.leaderstats:FindFirstChild("Kills") then
-        esp.Drawings.KillsText.Text = "Kills: " .. tostring(player.leaderstats.Kills.Value)
-        esp.Drawings.KillsText.Position = Vector2.new(boxPos.X + boxWidth / 2, bottomY)
-        esp.Drawings.KillsText.Color = baseColor
-        esp.Drawings.KillsText.Transparency = transparency
-        esp.Drawings.KillsText.Visible = true
-        bottomY = bottomY + bottomStep
-    end
-
-    if player and esp.Drawings.DeathsText and player:FindFirstChild("leaderstats") and player.leaderstats:FindFirstChild("Deaths") then
-        esp.Drawings.DeathsText.Text = "Deaths: " .. tostring(player.leaderstats.Deaths.Value)
-        esp.Drawings.DeathsText.Position = Vector2.new(boxPos.X + boxWidth / 2, bottomY)
-        esp.Drawings.DeathsText.Color = baseColor
-        esp.Drawings.DeathsText.Transparency = transparency
-        esp.Drawings.DeathsText.Visible = true
-        bottomY = bottomY + bottomStep
-    end
-
-    if esp.Drawings.Hat2D then
-        local hatTop = headScreen2D - Vector2.new(0, 20)
-        local hatLeft = headScreen2D - Vector2.new(10, 10)
-        local hatRight = headScreen2D + Vector2.new(10, -10)
-        esp.Drawings.Hat2D.PointA = hatTop
-        esp.Drawings.Hat2D.PointB = hatLeft
-        esp.Drawings.Hat2D.PointC = hatRight
-        esp.Drawings.Hat2D.Color = esp.Options.Colors.ChineseHat or baseColor
-        esp.Drawings.Hat2D.Transparency = transparency
-        esp.Drawings.Hat2D.Visible = true
-    end
-
-    if esp.Drawings.Hat3DLines then
-        local tip = headPos + Vector3.new(0, 3, 0)
-        local baseRadius = 1.5
-        local sides = #esp.Drawings.Hat3DLines
-        local baseCenter = headPos + Vector3.new(0, 1, 0)
-        local angleStep = 2 * math.pi / sides
-        for i = 1, sides do
-            local angle = i * angleStep
-            local basePoint = baseCenter + Vector3.new(math.cos(angle) * baseRadius, 0, math.sin(angle) * baseRadius)
-            local tipScreen, tv = Camera:WorldToViewportPoint(tip)
-            local baseScreen, bv = Camera:WorldToViewportPoint(basePoint)
-            if tv and bv then
-                esp.Drawings.Hat3DLines[i].From = Vector2.new(tipScreen.X, tipScreen.Y)
-                esp.Drawings.Hat3DLines[i].To = Vector2.new(baseScreen.X, baseScreen.Y)
-                esp.Drawings.Hat3DLines[i].Color = esp.Options.Colors.ChineseHat or baseColor
-                esp.Drawings.Hat3DLines[i].Transparency = transparency
-                esp.Drawings.Hat3DLines[i].Visible = true
-            else
-                esp.Drawings.Hat3DLines[i].Visible = false
+    -- render: chinese hat (3d cone)
+    if settings.features.chinese_hat and head then
+        local top = head.Position + Vector3(0, 1.5, 0)
+        local top_wts, top_vis = s.wts(s.cam, top)
+        
+        if top_vis then
+            local points = {}
+            local radius = 1.5
+            for i = 1, 8 do
+                local angle = (i/8) * pi * 2
+                local offset = Vector3(cos(angle)*radius, -0.5, sin(angle)*radius)
+                local p_wts = s.wts(s.cam, top + offset)
+                table.insert(points, Vector2(p_wts.X, p_wts.Y))
+            end
+            
+            -- manage lines
+            for i = 1, 8 do
+                if not self.drawings.hat_lines[i] then
+                    self.drawings.hat_lines[i] = create_draw("Line", {Thickness = 1, Transparency = 0.8})
+                end
+                
+                local l = self.drawings.hat_lines[i]
+                l.From = Vector2(top_wts.X, top_wts.Y)
+                l.To = points[i]
+                l.Color = settings.colors.hat
+                l.Visible = true
+                
+                -- connect base
+                if not self.drawings.hat_lines[i+8] then
+                    self.drawings.hat_lines[i+8] = create_draw("Line", {Thickness = 1, Transparency = 0.8})
+                end
+                local base = self.drawings.hat_lines[i+8]
+                base.From = points[i]
+                base.To = points[(i%8)+1]
+                base.Color = settings.colors.hat
+                base.Visible = true
             end
         end
+    else
+        for _, l in pairs(self.drawings.hat_lines) do l.Visible = false end
     end
 
-    if esp.Drawings.BBoxLines then
-        local minVec, maxVec = GetExtents(esp.Target)
-        local corners = {
-            Vector3.new(minVec.X, minVec.Y, minVec.Z),
-            Vector3.new(minVec.X, minVec.Y, maxVec.Z),
-            Vector3.new(minVec.X, maxVec.Y, minVec.Z),
-            Vector3.new(minVec.X, maxVec.Y, maxVec.Z),
-            Vector3.new(maxVec.X, minVec.Y, minVec.Z),
-            Vector3.new(maxVec.X, minVec.Y, maxVec.Z),
-            Vector3.new(maxVec.X, maxVec.Y, minVec.Z),
-            Vector3.new(maxVec.X, maxVec.Y, maxVec.Z),
-        }
-        local screenCorners = {}
-        for i, corner in ipairs(corners) do
-            local screen, _ = Camera:WorldToViewportPoint(corner)
-            screenCorners[i] = Vector2.new(screen.X, screen.Y)
-        end
-        local edges = {
-            {1, 2}, {1, 3}, {1, 5},
-            {2, 4}, {2, 6},
-            {3, 4}, {3, 7},
-            {4, 8},
-            {5, 6}, {5, 7},
-            {6, 8},
-            {7, 8},
-        }
-        for i, edge in ipairs(edges) do
-            esp.Drawings.BBoxLines[i].From = screenCorners[edge[1]]
-            esp.Drawings.BBoxLines[i].To = screenCorners[edge[2]]
-            esp.Drawings.BBoxLines[i].Color = esp.Options.Colors.BoundingBox or baseColor
-            esp.Drawings.BBoxLines[i].Transparency = transparency
-            esp.Drawings.BBoxLines[i].Visible = true
-        end
-    end
+    return true
+end
 
-    if esp.Drawings.BoxImage then
-        esp.Drawings.BoxImage.Position = boxPos + boxSize / 2
-        esp.Drawings.BoxImage.Size = boxSize / 2
-        esp.Drawings.BoxImage.Transparency = transparency
-        esp.Drawings.BoxImage.Visible = true
+-- // api
+function sor_visuals.Add(model, config)
+    local ent = Entity.new(model, config)
+    sor_visuals._registry[model] = ent
+    return ent
+end
+
+function sor_visuals.Remove(model)
+    if sor_visuals._registry[model] then
+        sor_visuals._registry[model]:destruct()
+        sor_visuals._registry[model] = nil
     end
 end
 
-RunService:BindToRenderStep("CustomESP", Enum.RenderPriority.Camera.Value + 1, function()
-    for i = #ESPs, 1, -1 do
-        local esp = ESPs[i]
-        if esp.Enabled then
-            UpdateESP(esp)
-        else
-            CustomESP:Destroy(esp)
-            table.remove(ESPs, i)
+function sor_visuals.Start(settings)
+    sor_visuals._config = settings
+    s.rs.RenderStepped:Connect(function()
+        if not sor_visuals._config.enabled then return end
+        for model, ent in pairs(sor_visuals._registry) do
+            local success = pcall(function() ent:update(sor_visuals._config) end)
+            if not success then ent:destruct(); sor_visuals._registry[model] = nil end
         end
-    end
-end)
+    end)
+end
 
-return CustomESP
+return sor_visuals
